@@ -8,7 +8,6 @@ use crate::utils::requests::{
 };
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::{DestinationContainer, DestinationWrapper};
-use cardinal_errors::CardinalError;
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::protocols::Digest;
@@ -25,7 +24,7 @@ impl CardinalProxy {
     pub fn new(context: Arc<CardinalContext>) -> Self {
         Self {
             context,
-            filters: FilterRegistry::new(),
+            filters: FilterRegistry::new().with_default_filters(),
         }
     }
 }

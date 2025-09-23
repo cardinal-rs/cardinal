@@ -5,6 +5,7 @@ use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::CardinalError;
 use pingora::http::ResponseHeader;
 use pingora::proxy::Session;
+use restricted_route_filter::RestrictedRouteFilter;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
@@ -49,10 +50,15 @@ impl FilterRegistry {
         Self {
             request_filters: HashMap::new(),
             response_filters: HashMap::new(),
+            global_request_filters: Vec::new(),
+            global_response_filters: Vec::new(),
         }
     }
 
-    pub fn with_default_filters(&mut self) {}
+    pub fn with_default_filters(mut self) -> Self {
+        self.register_global_request(Arc::new(RestrictedRouteFilter));
+        self
+    }
 
     pub fn register_request(&mut self, name: impl Into<String>, filter: Arc<DynRequestFilter>) {
         self.request_filters.insert(name.into(), filter);
@@ -62,16 +68,27 @@ impl FilterRegistry {
         self.response_filters.insert(name.into(), filter);
     }
 
+    pub fn register_global_request(&mut self, filter: Arc<DynRequestFilter>) {
+        self.global_request_filters.push(filter);
+    }
+
+    pub fn register_global_response(&mut self, filter: Arc<DynResponseFilter>) {
+        self.global_response_filters.push(filter);
+    }
+
     pub async fn run_request_filters(
         &self,
         session: &mut Session,
         backend: Arc<DestinationWrapper>,
     ) -> Result<FilterResult, CardinalError> {
-        let inbound_middleware = backend.get_inbound_middleware();
-        if inbound_middleware.is_empty() {
-            return Ok(FilterResult::Continue);
+        for filter in &self.global_request_filters {
+            let res = filter.on_request(session, backend.clone()).await?;
+            if let FilterResult::Responded = res {
+                return Ok(FilterResult::Responded);
+            }
         }
 
+        let inbound_middleware = backend.get_inbound_middleware();
         for middleware in inbound_middleware {
             let middleware_name = &middleware.name;
             match self.request_filters.get(middleware_name) {
@@ -97,12 +114,11 @@ impl FilterRegistry {
         backend: Arc<DestinationWrapper>,
         response: &mut ResponseHeader,
     ) {
-        let outbound_middleware = backend.get_outbound_middleware();
-
-        if outbound_middleware.is_empty() {
-            return;
+        for filter in &self.global_response_filters {
+            filter.on_response(session, backend.clone(), response).await;
         }
 
+        let outbound_middleware = backend.get_outbound_middleware();
         for middleware in outbound_middleware {
             let middleware_name = &middleware.name;
             match self.response_filters.get(middleware_name) {

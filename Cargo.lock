@@ -328,6 +328,7 @@ dependencies = [
  "cardinal-config",
  "cardinal-errors",
  "http",
+ "parking_lot",
  "pingora",
  "tracing",
 ]

@@ -35,9 +35,10 @@ pub trait ResponseFilter: Send + Sync {
     );
 }
 
-type DynRequestFilter = dyn RequestFilter + Send + Sync + 'static;
-type DynResponseFilter = dyn ResponseFilter + Send + Sync + 'static;
+pub type DynRequestFilter = dyn RequestFilter + Send + Sync + 'static;
+pub type DynResponseFilter = dyn ResponseFilter + Send + Sync + 'static;
 
+#[derive(Clone)]
 pub struct FilterRegistry {
     request_filters: HashMap<String, Arc<DynRequestFilter>>,
     response_filters: HashMap<String, Arc<DynResponseFilter>>,
@@ -60,20 +61,32 @@ impl FilterRegistry {
         self
     }
 
-    pub fn register_request(&mut self, name: impl Into<String>, filter: Arc<DynRequestFilter>) {
+    pub fn register_request(
+        &mut self,
+        name: impl Into<String>,
+        filter: Arc<DynRequestFilter>,
+    ) -> &mut Self {
         self.request_filters.insert(name.into(), filter);
+        self
     }
 
-    pub fn register_response(&mut self, name: impl Into<String>, filter: Arc<DynResponseFilter>) {
+    pub fn register_response(
+        &mut self,
+        name: impl Into<String>,
+        filter: Arc<DynResponseFilter>,
+    ) -> &mut Self {
         self.response_filters.insert(name.into(), filter);
+        self
     }
 
-    pub fn register_global_request(&mut self, filter: Arc<DynRequestFilter>) {
+    pub fn register_global_request(&mut self, filter: Arc<DynRequestFilter>) -> &mut Self {
         self.global_request_filters.push(filter);
+        self
     }
 
-    pub fn register_global_response(&mut self, filter: Arc<DynResponseFilter>) {
+    pub fn register_global_response(&mut self, filter: Arc<DynResponseFilter>) -> &mut Self {
         self.global_response_filters.push(filter);
+        self
     }
 
     pub async fn run_request_filters(
@@ -128,5 +141,11 @@ impl FilterRegistry {
                 }
             }
         }
+    }
+}
+
+impl Default for FilterRegistry {
+    fn default() -> Self {
+        Self::new().with_default_filters()
     }
 }

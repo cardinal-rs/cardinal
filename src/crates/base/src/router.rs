@@ -7,6 +7,12 @@ pub struct CardinalRouter {
     router: Router<()>,
 }
 
+impl Default for CardinalRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CardinalRouter {
     pub fn new() -> Self {
         Self {

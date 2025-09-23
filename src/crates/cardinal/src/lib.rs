@@ -1,9 +1,10 @@
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationContainer;
-use cardinal_base::provider::ProviderScope;
+use cardinal_base::provider::{Provider, ProviderScope};
 use cardinal_config::{load_config, CardinalConfig};
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
+use cardinal_proxy::filters::FilterRegistry;
 use cardinal_proxy::CardinalProxy;
 use pingora::prelude::Server;
 use pingora::proxy::http_proxy_service;
@@ -11,21 +12,41 @@ use std::sync::Arc;
 
 pub struct Cardinal {
     context: Arc<CardinalContext>,
+    filters: Arc<FilterRegistry>,
 }
 
 impl Cardinal {
-    pub fn from_paths(config: &[String]) -> Result<Self, CardinalError> {
-        let config = load_config(config)?;
-        Ok(Self::new(config))
+    pub fn builder(config: CardinalConfig) -> CardinalBuilder {
+        CardinalBuilder::new(config)
+    }
+
+    pub fn from_paths(config_paths: &[String]) -> Result<Self, CardinalError> {
+        Ok(CardinalBuilder::from_paths(config_paths)?.build())
     }
 
     pub fn new(config: CardinalConfig) -> Self {
-        let context = CardinalContext::new(config);
-        context.register::<DestinationContainer>(ProviderScope::Singleton);
+        CardinalBuilder::new(config).build()
+    }
 
-        Self {
-            context: Arc::new(context),
-        }
+    pub fn with_filters(mut self, filters: FilterRegistry) -> Self {
+        self.filters = Arc::new(filters);
+        self
+    }
+
+    pub fn replace_filter_registry(&mut self, filters: FilterRegistry) {
+        self.filters = Arc::new(filters);
+    }
+
+    pub fn filters_mut(&mut self) -> &mut FilterRegistry {
+        Arc::make_mut(&mut self.filters)
+    }
+
+    pub fn filters(&self) -> &Arc<FilterRegistry> {
+        &self.filters
+    }
+
+    pub fn context(&self) -> &Arc<CardinalContext> {
+        &self.context
     }
 
     pub fn run(&self) -> Result<(), CardinalError> {
@@ -36,7 +57,9 @@ impl Cardinal {
         })?;
         server.bootstrap();
 
-        let proxy = CardinalProxy::new(self.context.clone());
+        let proxy = CardinalProxy::builder(self.context.clone())
+            .with_filter_registry(self.filters.clone())
+            .build();
         let mut proxy_service = http_proxy_service(&server.configuration, proxy);
 
         let server_addr = self.context.config.server.address.clone();
@@ -47,5 +70,64 @@ impl Cardinal {
 
         server.add_service(proxy_service);
         server.run_forever();
+    }
+}
+
+pub struct CardinalBuilder {
+    context: CardinalContext,
+    filters: FilterRegistry,
+}
+
+impl CardinalBuilder {
+    pub fn new(config: CardinalConfig) -> Self {
+        let context = CardinalContext::new(config);
+        context.register::<DestinationContainer>(ProviderScope::Singleton);
+
+        Self {
+            context,
+            filters: FilterRegistry::default(),
+        }
+    }
+
+    pub fn from_paths(config_paths: &[String]) -> Result<Self, CardinalError> {
+        let config = load_config(config_paths)?;
+        Ok(Self::new(config))
+    }
+
+    pub fn context(&self) -> &CardinalContext {
+        &self.context
+    }
+
+    pub fn register_provider<T>(&self, scope: ProviderScope) -> &Self
+    where
+        T: Provider + Send + Sync + 'static,
+    {
+        self.context.register::<T>(scope);
+        self
+    }
+
+    pub fn filters(&self) -> &FilterRegistry {
+        &self.filters
+    }
+
+    pub fn filters_mut(&mut self) -> &mut FilterRegistry {
+        &mut self.filters
+    }
+
+    pub fn set_filter_registry(&mut self, registry: FilterRegistry) -> &mut Self {
+        self.filters = registry;
+        self
+    }
+
+    pub fn with_filter_registry(mut self, registry: FilterRegistry) -> Self {
+        self.filters = registry;
+        self
+    }
+
+    pub fn build(self) -> Cardinal {
+        Cardinal {
+            context: Arc::new(self.context),
+            filters: Arc::new(self.filters),
+        }
     }
 }

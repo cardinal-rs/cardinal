@@ -18,3 +18,4 @@ http.workspace = true
 cardinal-config = { path = "../config" }
 cardinal-errors = { path = "../errors" }
 async-trait.workspace = true
+parking_lot.workspace = true

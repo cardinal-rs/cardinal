@@ -34,7 +34,7 @@ impl DestinationWrapper {
         Self {
             has_routes: !destination.routes.is_empty(),
             destination,
-            router: router.unwrap_or_else(|| CardinalRouter::new()),
+            router: router.unwrap_or_default(),
             inbound_middleware,
             outbound_middleware,
         }
@@ -65,7 +65,7 @@ impl DestinationContainer {
             first_path_segment(req)
         };
 
-        self.destinations.get(&candidate_id?).map(|d| d.clone())
+        self.destinations.get(&candidate_id?).cloned()
     }
 }
 

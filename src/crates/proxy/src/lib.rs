@@ -1,4 +1,4 @@
-mod filters;
+pub mod filters;
 mod headers;
 mod utils;
 
@@ -17,14 +17,62 @@ use tracing::{debug, error, info, warn};
 
 pub struct CardinalProxy {
     context: Arc<CardinalContext>,
-    filters: FilterRegistry,
+    filters: Arc<FilterRegistry>,
 }
 
 impl CardinalProxy {
     pub fn new(context: Arc<CardinalContext>) -> Self {
+        Self::builder(context).build()
+    }
+
+    pub fn builder(context: Arc<CardinalContext>) -> CardinalProxyBuilder {
+        CardinalProxyBuilder::new(context)
+    }
+
+    pub fn filters(&self) -> &Arc<FilterRegistry> {
+        &self.filters
+    }
+
+    pub fn filters_mut(&mut self) -> &mut FilterRegistry {
+        Arc::make_mut(&mut self.filters)
+    }
+}
+
+pub struct CardinalProxyBuilder {
+    context: Arc<CardinalContext>,
+    filters: Arc<FilterRegistry>,
+}
+
+impl CardinalProxyBuilder {
+    pub fn new(context: Arc<CardinalContext>) -> Self {
         Self {
             context,
-            filters: FilterRegistry::new().with_default_filters(),
+            filters: Arc::new(FilterRegistry::default()),
+        }
+    }
+
+    pub fn with_filter_registry(mut self, filters: Arc<FilterRegistry>) -> Self {
+        self.filters = filters;
+        self
+    }
+
+    pub fn with_owned_filter_registry(mut self, filters: FilterRegistry) -> Self {
+        self.filters = Arc::new(filters);
+        self
+    }
+
+    pub fn filters(&self) -> &FilterRegistry {
+        self.filters.as_ref()
+    }
+
+    pub fn filters_mut(&mut self) -> &mut FilterRegistry {
+        Arc::make_mut(&mut self.filters)
+    }
+
+    pub fn build(self) -> CardinalProxy {
+        CardinalProxy {
+            context: self.context,
+            filters: self.filters,
         }
     }
 }

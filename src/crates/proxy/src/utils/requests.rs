@@ -1,9 +1,10 @@
-use cardinal_config::Destination;
+use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::proxy::CardinalProxyError;
 use cardinal_errors::CardinalError;
 use http::Uri;
 use pingora::http::RequestHeader;
 use pingora::proxy::Session;
+use std::sync::Arc;
 use tracing::debug;
 
 pub(crate) fn rewrite_request_path(req: &mut RequestHeader, backend_id: &str, force_path: bool) {
@@ -80,9 +81,9 @@ pub(crate) fn compose_upstream_url(
 
 pub(crate) fn set_upstream_host_headers(
     session: &mut Session,
-    backend: &Destination,
+    backend: &Arc<DestinationWrapper>,
 ) -> Result<(), CardinalError> {
-    let (up_host, up_port, up_tls) = parse_origin(&backend.url)?;
+    let (up_host, up_port, up_tls) = parse_origin(&backend.destination.url)?;
     let header_host = if (up_tls && up_port == 443) || (!up_tls && up_port == 80) {
         up_host.clone()
     } else {

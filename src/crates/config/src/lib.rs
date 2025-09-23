@@ -14,6 +14,18 @@ pub struct HealthCheck {
     pub expect_status: u16,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MiddlewareType {
+    Inbound,
+    Outbound,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct Middleware {
+    pub r#type: MiddlewareType,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct Destination {
     pub name: String,
@@ -21,23 +33,25 @@ pub struct Destination {
     pub health_check: Option<HealthCheck>,
     #[serde(default)]
     pub routes: Vec<Route>,
+    #[serde(default)]
+    pub middleware: Vec<Middleware>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct ServerConfig {
     pub address: String,
     pub force_path_parameter: bool,
+    pub log_upstream_response: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct Route {
-    pub host: String,
+    pub path: String,
     pub method: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct CardinalConfig {
-    pub log_upstream_response: bool,
     pub server: ServerConfig,
     pub destinations: BTreeMap<String, Destination>,
 }
@@ -47,6 +61,7 @@ impl Default for ServerConfig {
         ServerConfig {
             address: "0.0.0.0:1704".into(),
             force_path_parameter: true,
+            log_upstream_response: true,
         }
     }
 }

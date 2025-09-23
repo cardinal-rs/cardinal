@@ -1,13 +1,56 @@
 use crate::context::CardinalContext;
 use crate::provider::Provider;
+use crate::router::CardinalRouter;
 use async_trait::async_trait;
-use cardinal_config::Destination;
+use cardinal_config::{Destination, Middleware, MiddlewareType};
 use cardinal_errors::CardinalError;
 use pingora::http::RequestHeader;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+
+pub struct DestinationWrapper {
+    pub destination: Destination,
+    pub router: CardinalRouter,
+    pub has_routes: bool,
+    inbound_middleware: Vec<Middleware>,
+    outbound_middleware: Vec<Middleware>,
+}
+
+impl DestinationWrapper {
+    pub fn new(destination: Destination, router: Option<CardinalRouter>) -> Self {
+        let inbound_middleware = destination
+            .middleware
+            .iter()
+            .filter(|&e| e.r#type == MiddlewareType::Inbound)
+            .cloned()
+            .collect();
+        let outbound_middleware = destination
+            .middleware
+            .iter()
+            .filter(|&e| e.r#type == MiddlewareType::Outbound)
+            .cloned()
+            .collect();
+
+        Self {
+            has_routes: !destination.routes.is_empty(),
+            destination,
+            router: router.unwrap_or_else(|| CardinalRouter::new()),
+            inbound_middleware,
+            outbound_middleware,
+        }
+    }
+
+    pub fn get_inbound_middleware(&self) -> &Vec<Middleware> {
+        &self.inbound_middleware
+    }
+
+    pub fn get_outbound_middleware(&self) -> &Vec<Middleware> {
+        &self.outbound_middleware
+    }
+}
 
 pub struct DestinationContainer {
-    destinations: BTreeMap<String, Destination>,
+    destinations: BTreeMap<String, Arc<DestinationWrapper>>,
 }
 
 impl DestinationContainer {
@@ -15,23 +58,42 @@ impl DestinationContainer {
         &self,
         req: &RequestHeader,
         force_parameter: bool,
-    ) -> Option<&Destination> {
+    ) -> Option<Arc<DestinationWrapper>> {
         let candidate_id = if !force_parameter {
             extract_subdomain(req)
         } else {
             first_path_segment(req)
         };
 
-        self.destinations.get(&candidate_id?)
+        self.destinations.get(&candidate_id?).map(|d| d.clone())
     }
 }
 
 #[async_trait]
 impl Provider for DestinationContainer {
     async fn provide(ctx: &CardinalContext) -> Result<Self, CardinalError> {
-        Ok(Self {
-            destinations: ctx.config.destinations.clone(),
-        })
+        let destinations = ctx
+            .config
+            .destinations
+            .clone()
+            .into_iter()
+            .map(|(key, destination)| {
+                let router =
+                    destination
+                        .routes
+                        .iter()
+                        .fold(CardinalRouter::new(), |mut r, route| {
+                            let _ = r.add(route.method.as_str(), route.path.as_str());
+                            r
+                        });
+                (
+                    key,
+                    Arc::new(DestinationWrapper::new(destination, Some(router))),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        Ok(Self { destinations })
     }
 }
 

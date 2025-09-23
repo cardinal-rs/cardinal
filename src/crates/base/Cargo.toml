@@ -16,6 +16,7 @@ async-trait.workspace = true
 tracing.workspace = true
 cardinal-config = { path = "../config" }
 cardinal-errors = { path = "../errors" }
+matchit.workspace = true
 parking_lot.workspace = true
 pingora.workspace = true
 http.workspace = true

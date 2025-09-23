@@ -1,31 +1,38 @@
+mod filters;
+mod headers;
 mod utils;
 
+use crate::filters::{FilterRegistry, FilterResult};
 use crate::utils::requests::{
     compose_upstream_url, parse_origin, rewrite_request_path, set_upstream_host_headers,
 };
 use cardinal_base::context::CardinalContext;
-use cardinal_base::destinations::container::DestinationContainer;
-use cardinal_config::Destination;
+use cardinal_base::destinations::container::{DestinationContainer, DestinationWrapper};
+use cardinal_errors::CardinalError;
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::protocols::Digest;
 use pingora::upstreams::peer::Peer;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 pub struct CardinalProxy {
     context: Arc<CardinalContext>,
+    filters: FilterRegistry,
 }
 
 impl CardinalProxy {
     pub fn new(context: Arc<CardinalContext>) -> Self {
-        Self { context }
+        Self {
+            context,
+            filters: FilterRegistry::new(),
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl ProxyHttp for CardinalProxy {
-    type CTX = Option<Destination>;
+    type CTX = Option<Arc<DestinationWrapper>>;
 
     fn new_ctx(&self) -> Self::CTX {
         None
@@ -53,13 +60,31 @@ impl ProxyHttp for CardinalProxy {
                 }
             };
 
+        let destination_name = backend.destination.name.clone();
+
         // Prepare upstream Host/SNI headers
         let _ = set_upstream_host_headers(session, &backend);
-        info!(backend_id = %backend.name, "Routing to backend");
+        info!(backend_id = %destination_name, "Routing to backend");
 
         // Set backend context and rewrite path
         *ctx = Some(backend.clone());
-        rewrite_request_path(session.req_header_mut(), &backend.name, force_path);
+        rewrite_request_path(session.req_header_mut(), &destination_name, force_path);
+
+        let run_filters = self.filters.run_request_filters(session, backend).await;
+
+        let res = match run_filters {
+            Ok(filter_result) => filter_result,
+            Err(err) => {
+                error!(%err, "Error running request filters");
+                let _ = session.respond_error(500).await;
+                return Ok(true);
+            }
+        };
+
+        match res {
+            FilterResult::Continue => {}
+            FilterResult::Responded => return Ok(true),
+        }
 
         Ok(false)
     }
@@ -71,7 +96,7 @@ impl ProxyHttp for CardinalProxy {
     ) -> Result<Box<HttpPeer>> {
         if let Some(backend) = ctx {
             // Determine origin parts for TLS and SNI
-            let (host, port, is_tls) = parse_origin(&backend.url)
+            let (host, port, is_tls) = parse_origin(&backend.destination.url)
                 .map_err(|_| Error::new_str("Origin could not be parsed "))?;
             let hostport = format!("{}:{}", host, port);
 
@@ -84,7 +109,7 @@ impl ProxyHttp for CardinalProxy {
                 .unwrap_or("/");
             let upstream_url = compose_upstream_url(is_tls, &host, port, path_and_query);
 
-            info!(%upstream_url, backend_id = %backend.name, is_tls, sni = %host, "Forwarding to upstream");
+            info!(%upstream_url, backend_id = %backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
             debug!(upstream_origin = %hostport, "Connecting to upstream origin");
 
             let mut peer = HttpPeer::new(&hostport, is_tls, host);
@@ -109,31 +134,46 @@ impl ProxyHttp for CardinalProxy {
         _digest: Option<&Digest>,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
-        let backend_id = ctx.as_ref().map(|b| b.name.as_str()).unwrap_or("<unknown>");
+        let backend_id = ctx
+            .as_ref()
+            .map(|b| b.destination.name.as_str())
+            .unwrap_or("<unknown>");
         info!(backend_id, reused, peer = %peer, "Connected to upstream");
         Ok(())
     }
 
-    fn upstream_response_filter(
+    async fn response_filter(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         upstream_response: &mut ResponseHeader,
         ctx: &mut Self::CTX,
-    ) {
-        if !self.context.config.log_upstream_response {
-            return;
+    ) -> Result<()> {
+        if let Some(backend) = ctx.as_ref() {
+            self.filters
+                .run_response_filters(session, backend.clone(), upstream_response)
+                .await;
         }
+
+        if !self.context.config.server.log_upstream_response {
+            return Ok(());
+        }
+
         let status = upstream_response.status.as_u16();
         let location = upstream_response
             .headers
             .get("location")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
-        let backend_id = ctx.as_ref().map(|b| b.name.as_str()).unwrap_or("<unknown>");
+        let backend_id = ctx
+            .as_ref()
+            .map(|b| b.destination.name.as_str())
+            .unwrap_or("<unknown>");
         if let Some(loc) = location {
             info!(backend_id, status, location = %loc, "Upstream responded");
         } else {
             info!(backend_id, status, "Upstream responded");
         }
+
+        Ok(())
     }
 }

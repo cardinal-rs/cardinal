@@ -1,0 +1,40 @@
+use crate::filters::{FilterResult, RequestFilter};
+use crate::headers::CARDINAL_PARAMS_HEADER_BASE;
+use cardinal_base::destinations::container::DestinationWrapper;
+use cardinal_errors::CardinalError;
+use pingora::prelude::Session;
+use std::sync::Arc;
+
+pub struct RestrictedRouteFilter;
+
+#[async_trait::async_trait]
+impl RequestFilter for RestrictedRouteFilter {
+    async fn on_request(
+        &self,
+        session: &mut Session,
+        backend: Arc<DestinationWrapper>,
+    ) -> Result<FilterResult, CardinalError> {
+        if backend.has_routes {
+            let req_header = session.req_header();
+            let method = req_header.method.as_str().to_lowercase();
+            let validate = backend.router.valid(&method, req_header.uri.path());
+            if let Some((valid, params)) = validate {
+                if valid {
+                    let req_header = session.req_header_mut();
+                    for (k, v) in params {
+                        req_header
+                            .insert_header(format!("{}{}", CARDINAL_PARAMS_HEADER_BASE, k), v)
+                            .unwrap();
+                    }
+                }
+
+                Ok(FilterResult::Continue)
+            } else {
+                let _ = session.respond_error(402).await;
+                Ok(FilterResult::Responded)
+            }
+        } else {
+            Ok(FilterResult::Continue)
+        }
+    }
+}

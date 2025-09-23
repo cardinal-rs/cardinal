@@ -13,4 +13,6 @@ pub enum CardinalInternalError {
     ProviderNotRegistered,
     #[error("Unknown error {0}")]
     FailedToInitiateServer(String),
+    #[error("Invalid Route Configuration {0}")]
+    InvalidRouteConfiguration(String),
 }

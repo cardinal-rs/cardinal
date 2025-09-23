@@ -151,7 +151,7 @@ impl<'a> Drop for ConstructGuard<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::DefaultProviderError;
+    use async_trait::async_trait;
     use cardinal_errors::CardinalError;
 
     #[derive(Debug)]

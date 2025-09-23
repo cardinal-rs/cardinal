@@ -1,7 +1,7 @@
 use cardinal_errors::CardinalError;
 use clap::Parser;
-use cli::cmd::run::run_cmd;
-use cli::{Cli, Command};
+use cardinal_cli::cmd::run::run_cmd;
+use cardinal_cli::{Cli, Command};
 
 fn main() {
     let cli = Cli::parse();

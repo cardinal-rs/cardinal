@@ -17,7 +17,7 @@ pub enum FilterResult {
 }
 
 #[async_trait]
-pub trait RequestFilter: Send + Sync {
+pub trait RequestFilter: Send + Sync + 'static {
     async fn on_request(
         &self,
         session: &mut Session,
@@ -26,7 +26,7 @@ pub trait RequestFilter: Send + Sync {
 }
 
 #[async_trait]
-pub trait ResponseFilter: Send + Sync {
+pub trait ResponseFilter: Send + Sync + 'static {
     async fn on_response(
         &self,
         session: &mut Session,
@@ -44,6 +44,7 @@ pub struct FilterRegistry {
     response_filters: HashMap<String, Arc<DynResponseFilter>>,
     global_request_filters: Vec<Arc<DynRequestFilter>>,
     global_response_filters: Vec<Arc<DynResponseFilter>>,
+    defaults_enforced: bool,
 }
 
 impl FilterRegistry {
@@ -53,11 +54,12 @@ impl FilterRegistry {
             response_filters: HashMap::new(),
             global_request_filters: Vec::new(),
             global_response_filters: Vec::new(),
+            defaults_enforced: false,
         }
     }
 
     pub fn with_default_filters(mut self) -> Self {
-        self.register_global_request(Arc::new(RestrictedRouteFilter));
+        self.ensure_default_filters();
         self
     }
 
@@ -87,6 +89,14 @@ impl FilterRegistry {
     pub fn register_global_response(&mut self, filter: Arc<DynResponseFilter>) -> &mut Self {
         self.global_response_filters.push(filter);
         self
+    }
+
+    pub fn ensure_default_filters(&mut self) {
+        if !self.defaults_enforced {
+            self.global_request_filters
+                .insert(0, Arc::new(RestrictedRouteFilter));
+            self.defaults_enforced = true;
+        }
     }
 
     pub async fn run_request_filters(

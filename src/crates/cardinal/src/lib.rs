@@ -29,16 +29,22 @@ impl Cardinal {
     }
 
     pub fn with_filters(mut self, filters: FilterRegistry) -> Self {
+        let mut filters = filters;
+        filters.ensure_default_filters();
         self.filters = Arc::new(filters);
         self
     }
 
     pub fn replace_filter_registry(&mut self, filters: FilterRegistry) {
+        let mut filters = filters;
+        filters.ensure_default_filters();
         self.filters = Arc::new(filters);
     }
 
     pub fn filters_mut(&mut self) -> &mut FilterRegistry {
-        Arc::make_mut(&mut self.filters)
+        let registry = Arc::make_mut(&mut self.filters);
+        registry.ensure_default_filters();
+        registry
     }
 
     pub fn filters(&self) -> &Arc<FilterRegistry> {
@@ -111,23 +117,31 @@ impl CardinalBuilder {
     }
 
     pub fn filters_mut(&mut self) -> &mut FilterRegistry {
+        self.filters.ensure_default_filters();
         &mut self.filters
     }
 
     pub fn set_filter_registry(&mut self, registry: FilterRegistry) -> &mut Self {
+        let mut registry = registry;
+        registry.ensure_default_filters();
         self.filters = registry;
         self
     }
 
     pub fn with_filter_registry(mut self, registry: FilterRegistry) -> Self {
+        let mut registry = registry;
+        registry.ensure_default_filters();
         self.filters = registry;
         self
     }
 
     pub fn build(self) -> Cardinal {
+        let mut filters = self.filters;
+        filters.ensure_default_filters();
+
         Cardinal {
             context: Arc::new(self.context),
-            filters: Arc::new(self.filters),
+            filters: Arc::new(filters),
         }
     }
 }

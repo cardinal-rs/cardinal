@@ -34,7 +34,9 @@ impl CardinalProxy {
     }
 
     pub fn filters_mut(&mut self) -> &mut FilterRegistry {
-        Arc::make_mut(&mut self.filters)
+        let registry = Arc::make_mut(&mut self.filters);
+        registry.ensure_default_filters();
+        registry
     }
 }
 
@@ -52,11 +54,15 @@ impl CardinalProxyBuilder {
     }
 
     pub fn with_filter_registry(mut self, filters: Arc<FilterRegistry>) -> Self {
-        self.filters = filters;
+        let mut registry = (*filters).clone();
+        registry.ensure_default_filters();
+        self.filters = Arc::new(registry);
         self
     }
 
     pub fn with_owned_filter_registry(mut self, filters: FilterRegistry) -> Self {
+        let mut filters = filters;
+        filters.ensure_default_filters();
         self.filters = Arc::new(filters);
         self
     }
@@ -66,13 +72,18 @@ impl CardinalProxyBuilder {
     }
 
     pub fn filters_mut(&mut self) -> &mut FilterRegistry {
-        Arc::make_mut(&mut self.filters)
+        let registry = Arc::make_mut(&mut self.filters);
+        registry.ensure_default_filters();
+        registry
     }
 
     pub fn build(self) -> CardinalProxy {
+        let mut registry = (*self.filters).clone();
+        registry.ensure_default_filters();
+
         CardinalProxy {
             context: self.context,
-            filters: self.filters,
+            filters: Arc::new(registry),
         }
     }
 }

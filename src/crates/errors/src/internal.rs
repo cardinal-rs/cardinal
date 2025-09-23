@@ -11,4 +11,6 @@ pub enum CardinalInternalError {
     DependencyCycleDetected,
     #[error("No provider registered for requested type")]
     ProviderNotRegistered,
+    #[error("Unknown error {0}")]
+    FailedToInitiateServer(String),
 }

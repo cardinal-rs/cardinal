@@ -1,5 +1,5 @@
 pub mod context;
-mod destinations;
+pub mod destinations;
 pub mod provider;
 
 pub fn hello() {

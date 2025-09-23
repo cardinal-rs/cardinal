@@ -1,9 +1,12 @@
+use cardinal_config::Destination;
 use cardinal_errors::proxy::CardinalProxyError;
+use cardinal_errors::CardinalError;
 use http::Uri;
 use pingora::http::RequestHeader;
+use pingora::proxy::Session;
 use tracing::debug;
 
-fn rewrite_request_path(req: &mut RequestHeader, backend_id: &str, force_path: bool) {
+pub(crate) fn rewrite_request_path(req: &mut RequestHeader, backend_id: &str, force_path: bool) {
     if !force_path {
         return;
     }
@@ -32,7 +35,7 @@ fn rewrite_request_path(req: &mut RequestHeader, backend_id: &str, force_path: b
     }
 }
 
-fn parse_origin(origin: &str) -> Result<(String, u16, bool), CardinalProxyError> {
+pub(crate) fn parse_origin(origin: &str) -> Result<(String, u16, bool), CardinalProxyError> {
     // Always give Uri a scheme; default to http:// if missing
     let origin_with_scheme = if origin.starts_with("http://") || origin.starts_with("https://") {
         origin.to_string()
@@ -54,6 +57,59 @@ fn parse_origin(origin: &str) -> Result<(String, u16, bool), CardinalProxyError>
     let port = auth.port_u16().unwrap_or(if is_tls { 443 } else { 80 });
 
     Ok((host, port, is_tls))
+}
+
+pub(crate) fn compose_upstream_url(
+    is_tls: bool,
+    host: &str,
+    port: u16,
+    path_and_query: &str,
+) -> String {
+    let scheme = if is_tls { "https" } else { "http" };
+    let mut hostport = host.to_string();
+    if (is_tls && port != 443) || (!is_tls && port != 80) {
+        hostport = format!("{}:{}", host, port);
+    }
+    let pq = if path_and_query.starts_with('/') {
+        path_and_query.to_string()
+    } else {
+        format!("/{}", path_and_query)
+    };
+    format!("{}://{}{}", scheme, hostport, pq)
+}
+
+pub(crate) fn set_upstream_host_headers(
+    session: &mut Session,
+    backend: &Destination,
+) -> Result<(), CardinalError> {
+    let (up_host, up_port, up_tls) = parse_origin(&backend.url)?;
+    let header_host = if (up_tls && up_port == 443) || (!up_tls && up_port == 80) {
+        up_host.clone()
+    } else {
+        format!("{}:{}", up_host, up_port)
+    };
+
+    // Preserve original Host
+    let orig_host = session
+        .req_header()
+        .headers
+        .get("Host")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+
+    // Set Host to upstream host for virtual hosting and TLS SNI
+    session
+        .req_header_mut()
+        .insert_header("Host", header_host)
+        .unwrap();
+
+    if let Some(h) = orig_host {
+        let _ = session
+            .req_header_mut()
+            .insert_header("X-Forwarded-Host", h);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -11,18 +11,18 @@ pub struct DestinationContainer {
 }
 
 impl DestinationContainer {
-    fn get_backend_for_request(
+    pub fn get_backend_for_request(
         &self,
         req: &RequestHeader,
         force_parameter: bool,
     ) -> Option<&Destination> {
-        let candidate_id = if force_parameter {
+        let candidate_id = if !force_parameter {
             extract_subdomain(req)
         } else {
             first_path_segment(req)
-        }?;
+        };
 
-        self.destinations.get(&candidate_id)
+        self.destinations.get(&candidate_id?)
     }
 }
 

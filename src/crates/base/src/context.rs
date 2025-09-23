@@ -1,5 +1,4 @@
 use crate::provider::{Provider, ProviderScope};
-use async_trait::async_trait;
 use cardinal_config::CardinalConfig;
 use cardinal_errors::CardinalError;
 use parking_lot::{Mutex, RwLock};

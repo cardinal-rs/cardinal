@@ -1,5 +1,6 @@
 use crate::filters::{FilterResult, RequestFilter};
 use crate::headers::CARDINAL_PARAMS_HEADER_BASE;
+use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::CardinalError;
 use pingora::prelude::Session;
@@ -13,6 +14,7 @@ impl RequestFilter for RestrictedRouteFilter {
         &self,
         session: &mut Session,
         backend: Arc<DestinationWrapper>,
+        _cardinal: Arc<CardinalContext>,
     ) -> Result<FilterResult, CardinalError> {
         if backend.has_routes {
             let req_header = session.req_header();

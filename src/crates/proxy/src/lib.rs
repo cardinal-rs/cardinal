@@ -29,12 +29,13 @@ impl CardinalProxy {
         CardinalProxyBuilder::new(context)
     }
 
-    pub fn filters(&self) -> &Arc<FilterRegistry> {
-        &self.filters
+    pub fn filters(&self) -> &FilterRegistry {
+        self.filters.as_ref()
     }
 
     pub fn filters_mut(&mut self) -> &mut FilterRegistry {
         let registry = Arc::make_mut(&mut self.filters);
+        registry.set_context(self.context.clone());
         registry.ensure_default_filters();
         registry
     }
@@ -42,48 +43,51 @@ impl CardinalProxy {
 
 pub struct CardinalProxyBuilder {
     context: Arc<CardinalContext>,
-    filters: Arc<FilterRegistry>,
+    filters: FilterRegistry,
 }
 
 impl CardinalProxyBuilder {
     pub fn new(context: Arc<CardinalContext>) -> Self {
-        Self {
-            context,
-            filters: Arc::new(FilterRegistry::default()),
-        }
+        let filters = FilterRegistry::new(context.clone()).with_default_filters();
+
+        Self { context, filters }
     }
 
-    pub fn with_filter_registry(mut self, filters: Arc<FilterRegistry>) -> Self {
-        let mut registry = (*filters).clone();
-        registry.ensure_default_filters();
-        self.filters = Arc::new(registry);
+    pub fn with_filter_registry(mut self, filters: FilterRegistry) -> Self {
+        self.filters = filters.with_context(self.context.clone());
+        self.filters.ensure_default_filters();
         self
     }
 
-    pub fn with_owned_filter_registry(mut self, filters: FilterRegistry) -> Self {
-        let mut filters = filters;
-        filters.ensure_default_filters();
-        self.filters = Arc::new(filters);
+    pub fn with_shared_filter_registry(mut self, filters: Arc<FilterRegistry>) -> Self {
+        let registry = (*filters).clone().with_context(self.context.clone());
+        self.filters = registry;
+        self.filters.ensure_default_filters();
         self
+    }
+
+    pub fn with_owned_filter_registry(self, filters: FilterRegistry) -> Self {
+        self.with_filter_registry(filters)
     }
 
     pub fn filters(&self) -> &FilterRegistry {
-        self.filters.as_ref()
+        &self.filters
     }
 
     pub fn filters_mut(&mut self) -> &mut FilterRegistry {
-        let registry = Arc::make_mut(&mut self.filters);
-        registry.ensure_default_filters();
-        registry
+        self.filters.set_context(self.context.clone());
+        self.filters.ensure_default_filters();
+        &mut self.filters
     }
 
     pub fn build(self) -> CardinalProxy {
-        let mut registry = (*self.filters).clone();
-        registry.ensure_default_filters();
+        let mut filters = self.filters;
+        filters.set_context(self.context.clone());
+        filters.ensure_default_filters();
 
         CardinalProxy {
             context: self.context,
-            filters: Arc::new(registry),
+            filters: Arc::new(filters),
         }
     }
 }

@@ -1,0 +1,7 @@
+{
+  "decision": false,
+  "status": 422,
+  "resp_headers": {
+    "x-error": "missing tenant"
+  }
+}

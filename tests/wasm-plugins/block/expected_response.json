@@ -1,0 +1,8 @@
+{
+  "decision": false,
+  "status": 403,
+  "resp_headers": {
+    "x-blocked": "true",
+    "x-decision": "blocked"
+  }
+}

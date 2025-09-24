@@ -14,4 +14,8 @@ pub enum CardinalError {
     ProxyError(#[from] CardinalProxyError),
     #[error("Config Error {0}")]
     InvalidConfig(#[from] ConfigError),
+    #[error("IO Error")]
+    IoError(#[from] std::io::Error),
+    #[error("Other Error {0}")]
+    Other(String),
 }

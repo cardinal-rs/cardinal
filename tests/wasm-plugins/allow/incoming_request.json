@@ -1,0 +1,12 @@
+{
+  "req_headers": {
+    "authorization": "Bearer 12345",
+    "x-extra": "value"
+  },
+  "query": {
+    "tenant": "alpha"
+  },
+  "resp_headers": {},
+  "status": 0,
+  "body": null
+}

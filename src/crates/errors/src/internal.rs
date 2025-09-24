@@ -15,4 +15,6 @@ pub enum CardinalInternalError {
     FailedToInitiateServer(String),
     #[error("Invalid Route Configuration {0}")]
     InvalidRouteConfiguration(String),
+    #[error("Invalid Wasm Module {0}")]
+    InvalidWasmModule(String),
 }

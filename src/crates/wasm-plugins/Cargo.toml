@@ -1,5 +1,5 @@
 [package]
-name = "cardinal-filters"
+name = "cardinal-wasm-plugins"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,12 +11,9 @@ keywords = ["cardinal", "errors", "error-handling"]
 categories = ["development-tools"]
 
 [dependencies]
-pingora = { workspace = true, features = ["openssl"] }
-cardinal-base = { path = "../base" }
+wasmer = "6.0.1"
 cardinal-errors = { path = "../errors" }
-cardinal-wasm-filters = { path = "../wasm-filters" }
-cardinal-config = { path = "../config" }
-async-trait.workspace = true
-tracing.workspace = true
-url.workspace = true
-form_urlencoded = "1.2.2"
+derive_builder.workspace = true
+serde = { workspace = true, features = ["derive"] }
+bytes = "1.10.1"
+serde_json = "1.0"

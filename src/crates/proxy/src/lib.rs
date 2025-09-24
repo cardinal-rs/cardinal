@@ -5,7 +5,7 @@ use crate::utils::requests::{
 };
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::{DestinationContainer, DestinationWrapper};
-use cardinal_filters::filters::{FilterRegistry, MiddlewareResult};
+use cardinal_plugins::filters::{MiddlewareResult, PluginRunner};
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::protocols::Digest;
@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 
 pub struct CardinalProxy {
     context: Arc<CardinalContext>,
-    filters: Arc<FilterRegistry>,
+    filters: Arc<PluginRunner>,
 }
 
 impl CardinalProxy {
@@ -30,18 +30,18 @@ impl CardinalProxy {
 
 pub struct CardinalProxyBuilder {
     context: Arc<CardinalContext>,
-    filters: FilterRegistry,
+    filters: PluginRunner,
 }
 
 impl CardinalProxyBuilder {
     pub fn new(context: Arc<CardinalContext>) -> Self {
         Self {
             context: context.clone(),
-            filters: FilterRegistry::new(context),
+            filters: PluginRunner::new(context),
         }
     }
 
-    pub fn filters(&self) -> &FilterRegistry {
+    pub fn filters(&self) -> &PluginRunner {
         &self.filters
     }
 

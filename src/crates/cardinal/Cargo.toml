@@ -15,7 +15,7 @@ cardinal-base = { path = "../base" }
 cardinal-config = { path = "../config" }
 cardinal-errors = { path = "../errors" }
 cardinal-proxy = { path = "../proxy" }
-cardinal-filters = { path = "../filters" }
+cardinal-plugins = { path = "../plugins" }
 tracing.workspace = true
 parking_lot.workspace = true
 pingora.workspace = true

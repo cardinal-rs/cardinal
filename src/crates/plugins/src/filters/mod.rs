@@ -38,11 +38,11 @@ pub type DynRequestMiddleware = dyn RequestMiddleware + Send + Sync + 'static;
 pub type DynResponseMiddleware = dyn ResponseMiddleware + Send + Sync + 'static;
 
 #[derive(Clone)]
-pub struct FilterRegistry {
+pub struct PluginRunner {
     context: Arc<CardinalContext>,
 }
 
-impl FilterRegistry {
+impl PluginRunner {
     pub fn new(context: Arc<CardinalContext>) -> Self {
         Self { context }
     }

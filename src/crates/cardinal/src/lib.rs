@@ -4,7 +4,7 @@ use cardinal_base::provider::{Provider, ProviderScope};
 use cardinal_config::{load_config, CardinalConfig};
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
-use cardinal_filters::container::PluginContainer;
+use cardinal_plugins::container::PluginContainer;
 use cardinal_proxy::CardinalProxy;
 use pingora::prelude::Server;
 use pingora::proxy::http_proxy_service;

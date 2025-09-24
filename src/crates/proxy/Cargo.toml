@@ -16,5 +16,5 @@ cardinal-base = { path = "../base" }
 tracing.workspace = true
 http.workspace = true
 cardinal-errors = { path = "../errors" }
-cardinal-filters = { path = "../filters" }
+cardinal-plugins = { path = "../plugins" }
 async-trait.workspace = true

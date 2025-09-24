@@ -361,7 +361,7 @@ dependencies = [
  "cardinal-base",
  "cardinal-config",
  "cardinal-errors",
- "cardinal-filters",
+ "cardinal-plugins",
  "cardinal-proxy",
  "parking_lot",
  "pingora",
@@ -414,14 +414,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "cardinal-filters"
+name = "cardinal-plugins"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "cardinal-base",
  "cardinal-config",
  "cardinal-errors",
- "cardinal-wasm-filters",
+ "cardinal-wasm-plugins",
  "form_urlencoded",
  "pingora",
  "tracing",
@@ -435,14 +435,14 @@ dependencies = [
  "async-trait",
  "cardinal-base",
  "cardinal-errors",
- "cardinal-filters",
+ "cardinal-plugins",
  "http",
  "pingora",
  "tracing",
 ]
 
 [[package]]
-name = "cardinal-wasm-filters"
+name = "cardinal-wasm-plugins"
 version = "0.1.0"
 dependencies = [
  "bytes",

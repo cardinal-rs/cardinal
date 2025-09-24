@@ -1,5 +1,5 @@
-use crate::filters::{MiddlewareResult, RequestMiddleware};
 use crate::headers::CARDINAL_PARAMS_HEADER_BASE;
+use crate::runner::{MiddlewareResult, RequestMiddleware};
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::CardinalError;

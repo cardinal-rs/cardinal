@@ -83,7 +83,7 @@ impl CardinalBuilder {
         self
     }
 
-    pub fn build(mut self) -> Cardinal {
+    pub fn build(self) -> Cardinal {
         Cardinal {
             context: self.context,
         }

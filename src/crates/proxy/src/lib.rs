@@ -5,7 +5,7 @@ use crate::utils::requests::{
 };
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::{DestinationContainer, DestinationWrapper};
-use cardinal_plugins::filters::{MiddlewareResult, PluginRunner};
+use cardinal_plugins::runner::{MiddlewareResult, PluginRunner};
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::protocols::Digest;

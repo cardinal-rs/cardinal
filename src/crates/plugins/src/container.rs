@@ -1,5 +1,5 @@
 use crate::builtin::restricted_route_middleware::RestrictedRouteMiddleware;
-use crate::filters::{DynRequestMiddleware, DynResponseMiddleware, MiddlewareResult};
+use crate::runner::{DynRequestMiddleware, DynResponseMiddleware, MiddlewareResult};
 use crate::utils::parse_query_string_multi;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;

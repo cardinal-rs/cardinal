@@ -40,23 +40,28 @@ pub type DynResponseMiddleware = dyn ResponseMiddleware + Send + Sync + 'static;
 #[derive(Clone)]
 pub struct PluginRunner {
     context: Arc<CardinalContext>,
+    global_request: Arc<Vec<String>>,
+    global_response: Arc<Vec<String>>,
 }
 
 impl PluginRunner {
     pub fn new(context: Arc<CardinalContext>) -> Self {
-        Self { context }
+        let global_request = context.config.server.global_request_middleware.clone();
+        let global_response = context.config.server.global_response_middleware.clone();
+
+        Self {
+            context,
+            global_request: Arc::new(global_request),
+            global_response: Arc::new(global_response),
+        }
     }
 
-    fn global_request_filters(&self) -> Vec<String> {
-        self.context.config.server.global_request_middleware.clone()
+    fn global_request_filters(&self) -> &[String] {
+        &self.global_request
     }
 
-    fn global_response_filters(&self) -> Vec<String> {
-        self.context
-            .config
-            .server
-            .global_response_middleware
-            .clone()
+    fn global_response_filters(&self) -> &[String] {
+        &self.global_response
     }
 
     pub async fn run_request_filters(

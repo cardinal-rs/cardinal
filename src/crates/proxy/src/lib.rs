@@ -5,7 +5,7 @@ use crate::utils::requests::{
 };
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::{DestinationContainer, DestinationWrapper};
-use cardinal_filters::filters::{FilterRegistry, FilterResult};
+use cardinal_filters::filters::{FilterRegistry, MiddlewareResult};
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::protocols::Digest;
@@ -105,8 +105,8 @@ impl ProxyHttp for CardinalProxy {
         };
 
         match res {
-            FilterResult::Continue => {}
-            FilterResult::Responded => return Ok(true),
+            MiddlewareResult::Continue => {}
+            MiddlewareResult::Responded => return Ok(true),
         }
 
         Ok(false)

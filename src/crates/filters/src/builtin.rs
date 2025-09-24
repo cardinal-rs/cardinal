@@ -1,1 +1,1 @@
-pub mod restricted_route_filter;
+pub mod restricted_route_middleware;

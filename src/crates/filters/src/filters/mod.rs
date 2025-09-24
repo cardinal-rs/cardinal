@@ -5,28 +5,26 @@ use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::CardinalError;
 use pingora::http::ResponseHeader;
 use pingora::proxy::Session;
-use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FilterResult {
+pub enum MiddlewareResult {
     Continue,
     Responded,
 }
 
 #[async_trait]
-pub trait RequestFilter: Send + Sync + 'static {
+pub trait RequestMiddleware: Send + Sync + 'static {
     async fn on_request(
         &self,
         session: &mut Session,
         backend: Arc<DestinationWrapper>,
         cardinal: Arc<CardinalContext>,
-    ) -> Result<FilterResult, CardinalError>;
+    ) -> Result<MiddlewareResult, CardinalError>;
 }
 
 #[async_trait]
-pub trait ResponseFilter: Send + Sync + 'static {
+pub trait ResponseMiddleware: Send + Sync + 'static {
     async fn on_response(
         &self,
         session: &mut Session,
@@ -36,8 +34,8 @@ pub trait ResponseFilter: Send + Sync + 'static {
     );
 }
 
-pub type DynRequestFilter = dyn RequestFilter + Send + Sync + 'static;
-pub type DynResponseFilter = dyn ResponseFilter + Send + Sync + 'static;
+pub type DynRequestMiddleware = dyn RequestMiddleware + Send + Sync + 'static;
+pub type DynResponseMiddleware = dyn ResponseMiddleware + Send + Sync + 'static;
 
 #[derive(Clone)]
 pub struct FilterRegistry {
@@ -65,15 +63,15 @@ impl FilterRegistry {
         &self,
         session: &mut Session,
         backend: Arc<DestinationWrapper>,
-    ) -> Result<FilterResult, CardinalError> {
+    ) -> Result<MiddlewareResult, CardinalError> {
         let filter_container = self.context.get::<PluginContainer>().await?;
 
         for filter in self.global_request_filters() {
             let run = filter_container
                 .run_request_filter(&filter, session, backend.clone(), self.context.clone())
                 .await?;
-            if let FilterResult::Responded = run {
-                return Ok(FilterResult::Responded);
+            if let MiddlewareResult::Responded = run {
+                return Ok(MiddlewareResult::Responded);
             }
         }
 
@@ -88,12 +86,12 @@ impl FilterRegistry {
                     self.context.clone(),
                 )
                 .await?;
-            if let FilterResult::Responded = run {
-                return Ok(FilterResult::Responded);
+            if let MiddlewareResult::Responded = run {
+                return Ok(MiddlewareResult::Responded);
             }
         }
 
-        Ok(FilterResult::Continue)
+        Ok(MiddlewareResult::Continue)
     }
 
     pub async fn run_response_filters(

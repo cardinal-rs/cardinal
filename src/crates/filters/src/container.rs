@@ -1,12 +1,11 @@
-use crate::builtin::restricted_route_filter::RestrictedRouteFilter;
-use crate::filters::{DynRequestFilter, DynResponseFilter, FilterResult};
+use crate::builtin::restricted_route_middleware::RestrictedRouteMiddleware;
+use crate::filters::{DynRequestMiddleware, DynResponseMiddleware, MiddlewareResult};
 use crate::utils::parse_query_string_multi;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_base::provider::Provider;
 use cardinal_config::Plugin;
 use cardinal_errors::CardinalError;
-use cardinal_wasm_filters::instance::WasmInstance;
 use cardinal_wasm_filters::plugin::WasmPlugin;
 use cardinal_wasm_filters::runner::WasmRunner;
 use cardinal_wasm_filters::ExecutionContext;
@@ -16,8 +15,8 @@ use std::sync::Arc;
 use tracing::error;
 
 pub enum PluginBuiltInType {
-    Inbound(Arc<DynRequestFilter>),
-    Outbound(Arc<DynResponseFilter>),
+    Inbound(Arc<DynRequestMiddleware>),
+    Outbound(Arc<DynResponseMiddleware>),
 }
 
 pub enum PluginHandler {
@@ -44,9 +43,9 @@ impl PluginContainer {
 
     pub fn builtin_plugins() -> Vec<(String, Arc<PluginHandler>)> {
         vec![(
-            "RestrictedRouteFilter".to_string(),
+            "RestrictedRouteMiddleware".to_string(),
             Arc::new(PluginHandler::Builtin(PluginBuiltInType::Inbound(
-                Arc::new(RestrictedRouteFilter),
+                Arc::new(RestrictedRouteMiddleware),
             ))),
         )]
     }
@@ -65,7 +64,7 @@ impl PluginContainer {
         session: &mut Session,
         backend: Arc<DestinationWrapper>,
         ctx: Arc<CardinalContext>,
-    ) -> Result<FilterResult, CardinalError> {
+    ) -> Result<MiddlewareResult, CardinalError> {
         let plugin = self
             .plugins
             .get(name)
@@ -103,11 +102,11 @@ impl PluginContainer {
                     })?;
 
                     if exec.should_continue {
-                        return Ok(FilterResult::Continue);
+                        return Ok(MiddlewareResult::Continue);
                     }
                 }
 
-                Ok(FilterResult::Continue)
+                Ok(MiddlewareResult::Continue)
             }
         }
     }

@@ -1,4 +1,4 @@
-use crate::filters::{FilterResult, RequestFilter};
+use crate::filters::{MiddlewareResult, RequestMiddleware};
 use crate::headers::CARDINAL_PARAMS_HEADER_BASE;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
@@ -6,16 +6,16 @@ use cardinal_errors::CardinalError;
 use pingora::proxy::Session;
 use std::sync::Arc;
 
-pub struct RestrictedRouteFilter;
+pub struct RestrictedRouteMiddleware;
 
 #[async_trait::async_trait]
-impl RequestFilter for RestrictedRouteFilter {
+impl RequestMiddleware for RestrictedRouteMiddleware {
     async fn on_request(
         &self,
         session: &mut Session,
         backend: Arc<DestinationWrapper>,
         _cardinal: Arc<CardinalContext>,
-    ) -> Result<FilterResult, CardinalError> {
+    ) -> Result<MiddlewareResult, CardinalError> {
         if backend.has_routes {
             let req_header = session.req_header();
             let method = req_header.method.as_str().to_lowercase();
@@ -30,13 +30,13 @@ impl RequestFilter for RestrictedRouteFilter {
                     }
                 }
 
-                Ok(FilterResult::Continue)
+                Ok(MiddlewareResult::Continue)
             } else {
                 let _ = session.respond_error(402).await;
-                Ok(FilterResult::Responded)
+                Ok(MiddlewareResult::Responded)
             }
         } else {
-            Ok(FilterResult::Continue)
+            Ok(MiddlewareResult::Continue)
         }
     }
 }

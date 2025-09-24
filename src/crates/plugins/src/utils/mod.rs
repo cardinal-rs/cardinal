@@ -15,7 +15,6 @@ pub fn parse_query_string_multi(qs: &str) -> HashMap<String, Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::parse_query_string_multi;
-    use std::collections::HashMap;
 
     #[test]
     fn empty_string_returns_empty_map() {

@@ -55,15 +55,24 @@ impl Cardinal {
 
 pub struct CardinalBuilder {
     context: Arc<CardinalContext>,
+    auto_register_defaults: bool,
 }
 
 impl CardinalBuilder {
     pub fn new(config: CardinalConfig) -> Self {
         let context = Arc::new(CardinalContext::new(config));
-        context.register::<DestinationContainer>(ProviderScope::Singleton);
-        context.register::<PluginContainer>(ProviderScope::Singleton);
+        Self {
+            context,
+            auto_register_defaults: true,
+        }
+    }
 
-        Self { context }
+    pub fn new_empty(config: CardinalConfig) -> Self {
+        let context = Arc::new(CardinalContext::new(config));
+        Self {
+            context,
+            auto_register_defaults: false,
+        }
     }
 
     pub fn from_paths(config_paths: &[String]) -> Result<Self, CardinalError> {
@@ -82,8 +91,44 @@ impl CardinalBuilder {
         self.context.register::<T>(scope);
         self
     }
+    pub fn register_provider_with_factory<T, F>(self, scope: ProviderScope, factory: F) -> Self
+    where
+        T: Provider + Send + Sync + 'static,
+        F: Fn(Arc<CardinalContext>) -> Result<T, CardinalError> + Send + Sync + 'static,
+    {
+        let ctx = Arc::clone(&self.context);
+        let factory: Arc<dyn Fn(Arc<CardinalContext>) -> Result<T, CardinalError> + Send + Sync> =
+            Arc::new(factory);
+        self.context
+            .register_with_factory::<T, _, _>(scope, move |_ctx| {
+                let ctx_clone = Arc::clone(&ctx);
+                let factory = Arc::clone(&factory);
+                async move { (factory)(ctx_clone) }
+            });
+        self
+    }
+
+    pub fn register_singleton_instance<T>(self, instance: Arc<T>) -> Self
+    where
+        T: Provider + Send + Sync + 'static,
+    {
+        self.context.register_singleton_instance::<T>(instance);
+        self
+    }
 
     pub fn build(self) -> Cardinal {
+        if self.auto_register_defaults {
+            if !self.context.is_registered::<DestinationContainer>() {
+                self.context
+                    .register::<DestinationContainer>(ProviderScope::Singleton);
+            }
+
+            if !self.context.is_registered::<PluginContainer>() {
+                self.context
+                    .register::<PluginContainer>(ProviderScope::Singleton);
+            }
+        }
+
         Cardinal {
             context: self.context,
         }

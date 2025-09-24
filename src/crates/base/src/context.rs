@@ -4,6 +4,9 @@ use cardinal_errors::CardinalError;
 use parking_lot::{Mutex, RwLock};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
 
 pub struct CardinalContext {
@@ -11,6 +14,7 @@ pub struct CardinalContext {
     scopes: RwLock<HashMap<TypeId, ProviderScope>>, // registered scopes for types
     singletons: RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>, // cached singleton instances
     constructing: Mutex<HashSet<TypeId>>,           // basic cycle detection
+    factories: RwLock<HashMap<TypeId, Arc<dyn ProviderFactory>>>,
 }
 
 impl CardinalContext {
@@ -20,6 +24,7 @@ impl CardinalContext {
             scopes: RwLock::new(HashMap::new()),
             singletons: RwLock::new(HashMap::new()),
             constructing: Mutex::new(HashSet::new()),
+            factories: RwLock::new(HashMap::new()),
         }
     }
 
@@ -31,6 +36,41 @@ impl CardinalContext {
         let tid = TypeId::of::<T>();
         let mut map = self.scopes.write();
         map.insert(tid, scope);
+    }
+
+    pub fn register_with_factory<T, F, Fut>(&self, scope: ProviderScope, factory: F)
+    where
+        T: Provider + Send + Sync + 'static,
+        F: Fn(&CardinalContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<T, CardinalError>> + Send + 'static,
+    {
+        let tid = TypeId::of::<T>();
+        let factory = Arc::new(TypedFactory::<T, F> {
+            inner: factory,
+            _marker: PhantomData,
+        }) as Arc<dyn ProviderFactory>;
+
+        self.factories.write().insert(tid, factory);
+        self.register::<T>(scope);
+    }
+
+    pub fn register_singleton_instance<T>(&self, instance: Arc<T>)
+    where
+        T: Provider + Send + Sync + 'static,
+    {
+        let tid = TypeId::of::<T>();
+        self.register::<T>(ProviderScope::Singleton);
+        let erased: Arc<dyn Any + Send + Sync> = instance;
+        self.singletons.write().insert(tid, erased);
+        self.factories.write().remove(&tid);
+    }
+
+    pub fn is_registered<T>(&self) -> bool
+    where
+        T: Provider + Send + Sync + 'static,
+    {
+        let tid = TypeId::of::<T>();
+        self.scopes.read().contains_key(&tid)
     }
 
     // Lazily constructs values on first access and caches singletons.
@@ -67,29 +107,21 @@ impl CardinalContext {
                     Ok(g) => g,
                     Err(e) => return Err(e),
                 };
-                let value = match T::provide(self).await {
-                    Ok(v) => v,
-                    Err(e) => return Err(e),
+                let factory = self.factory_for::<T>();
+                let erased: Arc<dyn Any + Send + Sync> = match factory {
+                    Some(factory) => factory.create(self).await?,
+                    None => Arc::new(T::provide(self).await?) as Arc<dyn Any + Send + Sync>,
                 };
                 drop(guard);
-
-                let arc_t = Arc::new(value);
-                let erased: Arc<dyn Any + Send + Sync> = arc_t.clone();
 
                 // Insert into cache if still absent; another thread might have inserted meanwhile
                 {
                     let mut cache = self.singletons.write();
-                    cache.entry(tid).or_insert(erased);
+                    cache.entry(tid).or_insert(erased.clone());
                 }
 
                 // Return the (possibly newly) cached value
-                let existing = self.singletons.read().get(&tid).cloned().ok_or_else(|| {
-                    CardinalError::InternalError(
-                        cardinal_errors::internal::CardinalInternalError::ProviderNotBuilt,
-                    )
-                })?;
-
-                existing.downcast::<T>().map_err(|_| {
+                Arc::downcast::<T>(erased).map_err(|_| {
                     CardinalError::InternalError(
                         cardinal_errors::internal::CardinalInternalError::DependencyTypeMismatch,
                     )
@@ -101,12 +133,17 @@ impl CardinalContext {
                     Ok(g) => g,
                     Err(e) => return Err(e),
                 };
-                let value = match T::provide(self).await {
-                    Ok(v) => v,
-                    Err(e) => return Err(e),
+                let factory = self.factory_for::<T>();
+                let erased: Arc<dyn Any + Send + Sync> = match factory {
+                    Some(factory) => factory.create(self).await?,
+                    None => Arc::new(T::provide(self).await?) as Arc<dyn Any + Send + Sync>,
                 };
                 drop(guard);
-                Ok(Arc::new(value))
+                Arc::downcast::<T>(erased).map_err(|_| {
+                    CardinalError::InternalError(
+                        cardinal_errors::internal::CardinalInternalError::DependencyTypeMismatch,
+                    )
+                })
             }
         }
     }
@@ -134,6 +171,14 @@ impl CardinalContext {
         let mut set = self.constructing.lock();
         set.remove(&tid);
     }
+
+    fn factory_for<T>(&self) -> Option<Arc<dyn ProviderFactory>>
+    where
+        T: Provider + Send + Sync + 'static,
+    {
+        let tid = TypeId::of::<T>();
+        self.factories.read().get(&tid).cloned()
+    }
 }
 
 // RAII guard for the constructing set, to ensure cleanup on early returns
@@ -145,6 +190,33 @@ struct ConstructGuard<'a> {
 impl<'a> Drop for ConstructGuard<'a> {
     fn drop(&mut self) {
         self.ctx.unmark_constructing(self.tid);
+    }
+}
+
+type ProviderFuture =
+    Pin<Box<dyn Future<Output = Result<Arc<dyn Any + Send + Sync>, CardinalError>> + Send>>;
+
+trait ProviderFactory: Send + Sync {
+    fn create(&self, ctx: &CardinalContext) -> ProviderFuture;
+}
+
+struct TypedFactory<T, F> {
+    inner: F,
+    _marker: PhantomData<T>,
+}
+
+impl<T, F, Fut> ProviderFactory for TypedFactory<T, F>
+where
+    T: Provider + Send + Sync + 'static,
+    F: Fn(&CardinalContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, CardinalError>> + Send + 'static,
+{
+    fn create(&self, ctx: &CardinalContext) -> ProviderFuture {
+        let fut = (self.inner)(ctx);
+        Box::pin(async move {
+            let value = fut.await?;
+            Ok(Arc::new(value) as Arc<dyn Any + Send + Sync>)
+        })
     }
 }
 
@@ -196,6 +268,52 @@ mod tests {
 
     fn get_context() -> CardinalContext {
         CardinalContext::new(CardinalConfig::default())
+    }
+
+    #[tokio::test]
+    async fn register_with_factory_preempts_default_provider() {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        struct StringProvider(pub String);
+
+        #[async_trait]
+        impl Provider for StringProvider {
+            async fn provide(_ctx: &CardinalContext) -> Result<Self, CardinalError> {
+                Ok(StringProvider("Hello".to_string()))
+            }
+        }
+
+        let ctx = get_context();
+        ctx.register_with_factory::<StringProvider, _, _>(ProviderScope::Singleton, |_ctx| async {
+            Ok(StringProvider("Overridden".to_string()))
+        });
+
+        assert!(ctx.is_registered::<StringProvider>());
+        let a = ctx.get::<StringProvider>().await.unwrap();
+        let b = ctx.get::<StringProvider>().await.unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+        assert_eq!(a.0, "Overridden");
+    }
+
+    #[tokio::test]
+    async fn register_singleton_instance_returns_same_arc() {
+        #[derive(Debug)]
+        struct Static;
+
+        #[async_trait]
+        impl Provider for Static {
+            async fn provide(_ctx: &CardinalContext) -> Result<Self, CardinalError> {
+                Ok(Static)
+            }
+        }
+
+        let ctx = get_context();
+        let instance = Arc::new(Static);
+        ctx.register_singleton_instance::<Static>(instance.clone());
+
+        let a = ctx.get::<Static>().await.unwrap();
+        let b = ctx.get::<Static>().await.unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+        assert!(Arc::ptr_eq(&a, &instance));
     }
 
     #[tokio::test]

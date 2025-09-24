@@ -4,7 +4,8 @@
     "x-extra": "value"
   },
   "query": {
-    "tenant": "alpha"
+    "tenant": ["alpha", "beta"],
+    "feature": "canary"
   },
   "resp_headers": {},
   "status": 0,

@@ -3,7 +3,7 @@ use crate::headers::CARDINAL_PARAMS_HEADER_BASE;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::CardinalError;
-use pingora::prelude::Session;
+use pingora::proxy::Session;
 use std::sync::Arc;
 
 pub struct RestrictedRouteFilter;

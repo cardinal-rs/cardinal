@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use wasmer::Memory;
 
 mod host;
-mod instance;
-mod plugin;
-mod runner;
+pub mod instance;
+pub mod plugin;
+pub mod runner;
 mod utils;
 
 /// Per-instance host context; we’ll extend this in the next step
@@ -15,7 +15,7 @@ mod utils;
 pub struct ExecutionContext {
     pub memory: Option<Memory>,
     pub req_headers: HashMap<String, String>,
-    pub query: HashMap<String, String>,
+    pub query: HashMap<String, Vec<String>>,
     pub resp_headers: HashMap<String, String>,
     pub status: i32,
     pub body: Option<Bytes>,
@@ -27,7 +27,7 @@ mod tests {
     use crate::plugin::WasmPlugin;
     use crate::runner::WasmRunner;
     use bytes::Bytes;
-    use serde_json::{Map, Value};
+    use serde_json::Value;
     use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -80,7 +80,7 @@ mod tests {
             name
         );
 
-        let actual_headers = lowercase_map(result.execution_context.resp_headers.clone());
+        let actual_headers = lowercase_string_map(result.execution_context.resp_headers.clone());
         for (key, value) in expected.resp_headers.iter() {
             let actual = actual_headers
                 .get(key)
@@ -102,9 +102,9 @@ mod tests {
     }
 
     fn execution_context_from_value(value: &Value) -> ExecutionContext {
-        let req_headers = lowercase_map(json_object(value.get("req_headers")));
-        let query = lowercase_map(json_object(value.get("query")));
-        let resp_headers = lowercase_map(json_object(value.get("resp_headers")));
+        let req_headers = lowercase_string_map(json_string_map(value.get("req_headers")));
+        let query = lowercase_string_vec_map(json_string_vec_map(value.get("query")));
+        let resp_headers = lowercase_string_map(json_string_map(value.get("resp_headers")));
         let status = value.get("status").and_then(Value::as_i64).unwrap_or(0) as i32;
         let body = value.get("body").and_then(body_from_value);
 
@@ -124,7 +124,7 @@ mod tests {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let status = value.get("status").and_then(Value::as_i64).unwrap_or(0) as i32;
-        let resp_headers = lowercase_map(json_object(value.get("resp_headers")));
+        let resp_headers = lowercase_string_map(json_string_map(value.get("resp_headers")));
 
         ExpectedResponse {
             decision,
@@ -133,20 +133,44 @@ mod tests {
         }
     }
 
-    fn json_object(value: Option<&Value>) -> HashMap<String, String> {
+    fn json_string_map(value: Option<&Value>) -> HashMap<String, String> {
         match value {
-            Some(Value::Object(map)) => map_to_string_map(map),
+            Some(Value::Object(map)) => map
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect(),
             _ => HashMap::new(),
         }
     }
 
-    fn map_to_string_map(map: &Map<String, Value>) -> HashMap<String, String> {
-        map.iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+    fn json_string_vec_map(value: Option<&Value>) -> HashMap<String, Vec<String>> {
+        match value {
+            Some(Value::Object(map)) => map
+                .iter()
+                .map(|(k, v)| (k.clone(), value_to_string_vec(v)))
+                .collect(),
+            _ => HashMap::new(),
+        }
+    }
+
+    fn value_to_string_vec(value: &Value) -> Vec<String> {
+        match value {
+            Value::String(s) => vec![s.to_string()],
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn lowercase_string_map(map: HashMap<String, String>) -> HashMap<String, String> {
+        map.into_iter()
+            .map(|(k, v)| (k.to_ascii_lowercase(), v))
             .collect()
     }
 
-    fn lowercase_map(map: HashMap<String, String>) -> HashMap<String, String> {
+    fn lowercase_string_vec_map(map: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
         map.into_iter()
             .map(|(k, v)| (k.to_ascii_lowercase(), v))
             .collect()

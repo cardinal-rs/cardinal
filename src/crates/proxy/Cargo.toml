@@ -15,7 +15,6 @@ pingora = { workspace = true, features = ["openssl"] }
 cardinal-base = { path = "../base" }
 tracing.workspace = true
 http.workspace = true
-cardinal-config = { path = "../config" }
 cardinal-errors = { path = "../errors" }
+cardinal-filters = { path = "../filters" }
 async-trait.workspace = true
-parking_lot.workspace = true

@@ -70,7 +70,7 @@ mod tests {
             .unwrap_or_else(|e| panic!("plugin execution failed for {:?}: {}", wasm_path, e));
 
         assert_eq!(
-            result.decision, expected.decision,
+            result.should_continue, expected.should_continue,
             "decision mismatch for {}",
             name
         );
@@ -119,15 +119,15 @@ mod tests {
     }
 
     fn expected_response_from_value(value: &Value) -> ExpectedResponse {
-        let decision = value
-            .get("decision")
+        let should_continue = value
+            .get("should_continue")
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let status = value.get("status").and_then(Value::as_i64).unwrap_or(0) as i32;
         let resp_headers = lowercase_string_map(json_string_map(value.get("resp_headers")));
 
         ExpectedResponse {
-            decision,
+            should_continue,
             status,
             resp_headers,
         }
@@ -185,7 +185,7 @@ mod tests {
     }
 
     struct ExpectedResponse {
-        decision: bool,
+        should_continue: bool,
         status: i32,
         resp_headers: HashMap<String, String>,
     }

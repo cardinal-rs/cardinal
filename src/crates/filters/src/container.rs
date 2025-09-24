@@ -13,6 +13,7 @@ use cardinal_wasm_filters::ExecutionContext;
 use pingora::prelude::Session;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::error;
 
 pub enum PluginBuiltInType {
     Inbound(Arc<DynRequestFilter>),
@@ -90,10 +91,9 @@ impl PluginContainer {
                 let query =
                     parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
 
-                let instance = WasmInstance::from_plugin(wasm)?;
                 {
                     let runner = WasmRunner::new(wasm);
-                    runner.run(ExecutionContext {
+                    let exec = runner.run(ExecutionContext {
                         memory: None,
                         req_headers: get_req_headers,
                         query,
@@ -101,9 +101,70 @@ impl PluginContainer {
                         status: 0,
                         body: None,
                     })?;
+
+                    if exec.should_continue {
+                        return Ok(FilterResult::Continue);
+                    }
                 }
 
                 Ok(FilterResult::Continue)
+            }
+        }
+    }
+
+    pub async fn run_response_filter(
+        &self,
+        name: &str,
+        session: &mut Session,
+        backend: Arc<DestinationWrapper>,
+        response: &mut pingora::http::ResponseHeader,
+        ctx: Arc<CardinalContext>,
+    ) {
+        let plugin = self
+            .plugins
+            .get(name)
+            .ok_or_else(|| CardinalError::Other(format!("Plugin {} does not exist", name)));
+
+        if let Ok(plugin) = plugin {
+            match plugin.as_ref() {
+                PluginHandler::Builtin(builtin) => match builtin {
+                    PluginBuiltInType::Inbound(_) => {
+                        error!("The filter {} is not a response filter", name);
+                    }
+                    PluginBuiltInType::Outbound(filter) => {
+                        filter.on_response(session, backend, response, ctx).await
+                    }
+                },
+                PluginHandler::Wasm(wasm) => {
+                    let get_req_headers = session
+                        .req_header()
+                        .headers
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
+                        .collect();
+                    let query =
+                        parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
+
+                    {
+                        let runner = WasmRunner::new(wasm);
+                        let exec = runner.run(ExecutionContext {
+                            memory: None,
+                            req_headers: get_req_headers,
+                            query,
+                            resp_headers: Default::default(),
+                            status: 0,
+                            body: None,
+                        });
+
+                        if let Ok(exec) = exec {
+                            if exec.should_continue {
+                                return;
+                            }
+                        } else if let Err(e) = exec {
+                            error!("Failed to run plugin {}: {}", name, e);
+                        }
+                    }
+                }
             }
         }
     }

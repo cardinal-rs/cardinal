@@ -1,5 +1,5 @@
 {
-  "decision": true,
+  "should_continue": true,
   "status": 200,
   "resp_headers": {
     "x-decision": "allow",

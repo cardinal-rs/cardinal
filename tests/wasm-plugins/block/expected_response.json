@@ -1,5 +1,5 @@
 {
-  "decision": false,
+  "should_continue": false,
   "status": 403,
   "resp_headers": {
     "x-blocked": "true",

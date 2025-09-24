@@ -102,34 +102,32 @@ impl FilterRegistry {
         backend: Arc<DestinationWrapper>,
         response: &mut ResponseHeader,
     ) {
-        // for filter in &self.global_response_filters {
-        //     filter
-        //         .on_response(
-        //             session,
-        //             backend.clone(),
-        //             response,
-        //             self.cardinal_context.clone(),
-        //         )
-        //         .await;
-        // }
-        //
-        // let outbound_middleware = backend.get_outbound_middleware();
-        // for middleware in outbound_middleware {
-        //     let middleware_name = &middleware.name;
-        //     match self.response_filters.get(middleware_name) {
-        //         Some(f) => {
-        //             f.on_response(
-        //                 session,
-        //                 backend.clone(),
-        //                 response,
-        //                 self.cardinal_context.clone(),
-        //             )
-        //             .await
-        //         }
-        //         None => {
-        //             warn!(filter = %middleware_name, backend_id = %backend.destination.name, "Unknown post-filter referenced; skipping")
-        //         }
-        //     }
-        // }
+        let filter_container = self.context.get::<PluginContainer>().await.unwrap();
+
+        for filter in self.global_response_filters() {
+            filter_container
+                .run_response_filter(
+                    &filter,
+                    session,
+                    backend.clone(),
+                    response,
+                    self.context.clone(),
+                )
+                .await;
+        }
+
+        let outbound_middleware = backend.get_outbound_middleware();
+        for middleware in outbound_middleware {
+            let middleware_name = &middleware.name;
+            filter_container
+                .run_response_filter(
+                    &middleware_name,
+                    session,
+                    backend.clone(),
+                    response,
+                    self.context.clone(),
+                )
+                .await;
+        }
     }
 }

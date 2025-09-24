@@ -6,7 +6,7 @@ use cardinal_errors::CardinalError;
 use wasmer::TypedFunction;
 
 pub struct ExecutionResult {
-    pub decision: bool,
+    pub should_continue: bool,
     pub execution_context: ExecutionContext,
 }
 
@@ -97,7 +97,7 @@ impl<'a> WasmRunner<'a> {
         })?;
 
         Ok(ExecutionResult {
-            decision: decision == 1,
+            should_continue: decision == 1,
             execution_context: instance.env.as_ref(&instance.store).clone(),
         })
     }

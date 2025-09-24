@@ -1,3 +1,5 @@
+mod tests;
+
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationContainer;
 use cardinal_base::provider::{Provider, ProviderScope};

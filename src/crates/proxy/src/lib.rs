@@ -137,8 +137,8 @@ impl ProxyHttp for CardinalProxy {
 
             let mut peer = HttpPeer::new(&hostport, is_tls, host);
             if let Some(opts) = peer.get_mut_peer_options() {
-                // Prefer HTTP/2 with fallback to HTTP/1.1
-                opts.set_http_version(2, 2);
+                // Allow both HTTP/1.1 and HTTP/2 so plain HTTP backends keep working.
+                opts.set_http_version(2, 1);
             }
             let peer = Box::new(peer);
             Ok(peer)

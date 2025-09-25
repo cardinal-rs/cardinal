@@ -28,7 +28,7 @@ impl CardinalRouter {
     }
 
     pub fn valid(&self, method: &str, path: &str) -> Option<(bool, HashMap<String, String>)> {
-        let actual_path = format!("{}:{}", method, path);
+        let actual_path = format!("{}:{}", method.to_lowercase(), path);
         let route_res = self.router.at(actual_path.as_str());
         match route_res {
             Ok(e) => Some((
@@ -102,7 +102,7 @@ mod tests {
         let mut router = CardinalRouter::new();
         router.add("GET", "/status").unwrap();
 
-        assert!(router.valid("get", "/status").is_none());
+        assert!(router.valid("get", "/status").is_some());
     }
 
     #[test]

@@ -19,7 +19,7 @@ mod tests {
     use cardinal_wasm_plugins::ExecutionContext;
     use pingora::proxy::Session;
     use std::collections::HashMap;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
     use std::thread::JoinHandle;
@@ -56,15 +56,64 @@ mod tests {
         SERVER.get_or_init(create_cardinal_ins)
     }
 
-    fn get_running_folder() -> PathBuf {
-        std::env::current_dir().unwrap_or(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
-    }
-
     fn load_test_config(name: &str) -> CardinalConfig {
-        let path = get_running_folder().join("src/tests/configs").join(name);
-
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/tests/configs")
+            .join(name);
         let path_str = path.to_string_lossy().to_string();
         load_config(&[path_str]).expect("failed to load test config")
+    }
+
+    const STARTUP_WAIT_MS: u64 = 500;
+
+    async fn wait_for_startup() {
+        tokio::time::sleep(Duration::from_millis(STARTUP_WAIT_MS)).await;
+    }
+
+    fn http_url(address: &str, path: &str) -> String {
+        format!("http://{}{}", address, path)
+    }
+
+    fn destination_url(config: &CardinalConfig, name: &str) -> String {
+        config
+            .destinations
+            .get(name)
+            .unwrap_or_else(|| panic!("missing destination {name}"))
+            .url
+            .clone()
+    }
+
+    fn spawn_backend(
+        handle: &Handle,
+        address: impl Into<String>,
+        routes: Vec<Route>,
+    ) -> TestHttpServer {
+        create_server_with(address.into(), handle.clone(), routes)
+    }
+
+    fn cardinal_with_plugin_factory<F>(config: CardinalConfig, init: F) -> Cardinal
+    where
+        F: Fn(&mut PluginContainer) + Send + Sync + 'static,
+    {
+        let init = Arc::new(init);
+        Cardinal::builder(config)
+            .register_provider_with_factory::<PluginContainer, _>(
+                ProviderScope::Singleton,
+                move |_ctx| {
+                    let init = Arc::clone(&init);
+                    let mut container = PluginContainer::new_empty();
+                    init(&mut container);
+                    Ok(container)
+                },
+            )
+            .build()
+    }
+
+    fn expect_status(err: UreqError, expected: u16) {
+        match err {
+            UreqError::StatusCode(code) => assert_eq!(code, expected),
+            _ => panic!("unexpected error variant"),
+        }
     }
 
     fn create_cardinal_ins() -> Mutex<std::thread::JoinHandle<()>> {
@@ -125,18 +174,16 @@ mod tests {
     #[tokio::test]
     async fn test_cardinal_default() {
         let _run_cardinal = run_cardinal();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        wait_for_startup().await;
         let _servers = get_servers().await;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        wait_for_startup().await;
 
-        let mut response = ureq::post("http://127.0.0.1:1704/posts/post")
+        let mut response = ureq::post(&http_url("127.0.0.1:1704", "/posts/post"))
             .config()
             .timeout_send_request(Some(std::time::Duration::from_secs(1)))
             .build()
             .send_empty()
             .unwrap();
-
-        println!("Hello");
 
         let status = response.status();
         let body = response.body_mut().read_to_string().unwrap();
@@ -147,14 +194,15 @@ mod tests {
     #[tokio::test]
     async fn global_request_middleware_executes_before_backend() {
         let handle = runtime_handle().await;
-
+        let config = load_test_config("global_request_middleware.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
         let backend_hits = Arc::new(AtomicUsize::new(0));
         let request_hits = Arc::new(AtomicUsize::new(0));
-        let backend_addr = "127.0.0.1:2905".to_string();
         let backend_hits_clone = backend_hits.clone();
-        let _backend_server = create_server_with(
+        let _backend_server = spawn_backend(
+            &handle,
             backend_addr.clone(),
-            handle.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
                 let response = Response::from_string("middleware-ok");
@@ -162,34 +210,24 @@ mod tests {
             })],
         );
 
-        let plugin_name = "TestGlobalRequest".to_string();
-        let server_addr = "127.0.0.1:1805".to_string();
-        let config = load_test_config("global_request_middleware.toml");
-
         let request_hits_clone = request_hits.clone();
+        let plugin_name = "TestGlobalRequest".to_string();
         let plugin_name_clone = plugin_name.clone();
-        let cardinal = Cardinal::builder(config)
-            .register_provider_with_factory::<PluginContainer, _>(
-                ProviderScope::Singleton,
-                move |_ctx| {
-                    let mut container = PluginContainer::new_empty();
-                    container.add_plugin(
-                        plugin_name_clone.clone(),
-                        PluginHandler::Builtin(PluginBuiltInType::Inbound(Arc::new(
-                            TestGlobalRequestMiddleware {
-                                hits: request_hits_clone.clone(),
-                            },
-                        ))),
-                    );
-                    Ok(container)
-                },
-            )
-            .build();
+        let cardinal = cardinal_with_plugin_factory(config, move |container| {
+            container.add_plugin(
+                plugin_name_clone.clone(),
+                PluginHandler::Builtin(PluginBuiltInType::Inbound(Arc::new(
+                    TestGlobalRequestMiddleware {
+                        hits: request_hits_clone.clone(),
+                    },
+                ))),
+            );
+        });
 
         let _cardinal_thread = spawn_cardinal(cardinal);
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        wait_for_startup().await;
 
-        let mut response = ureq::get(&format!("http://{}/posts/post", server_addr))
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
             .call()
             .unwrap();
         assert_eq!(response.status(), 200);
@@ -203,13 +241,14 @@ mod tests {
     #[tokio::test]
     async fn global_response_middleware_decorates_response() {
         let handle = runtime_handle().await;
-
+        let config = load_test_config("global_response_middleware.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
         let backend_hits = Arc::new(AtomicUsize::new(0));
-        let backend_addr = "127.0.0.1:2906".to_string();
         let backend_hits_clone = backend_hits.clone();
-        let _backend_server = create_server_with(
+        let _backend_server = spawn_backend(
+            &handle,
             backend_addr.clone(),
-            handle.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
                 let response = Response::from_string("base-response");
@@ -217,37 +256,27 @@ mod tests {
             })],
         );
 
-        let plugin_name = "TestGlobalResponse".to_string();
-        let server_addr = "127.0.0.1:1806".to_string();
-        let config = load_test_config("global_response_middleware.toml");
-
         let response_hits = Arc::new(AtomicUsize::new(0));
         let response_hits_clone = response_hits.clone();
+        let plugin_name = "TestGlobalResponse".to_string();
         let plugin_name_clone = plugin_name.clone();
-        let cardinal = Cardinal::builder(config)
-            .register_provider_with_factory::<PluginContainer, _>(
-                ProviderScope::Singleton,
-                move |_ctx| {
-                    let mut container = PluginContainer::new_empty();
-                    container.add_plugin(
-                        plugin_name_clone.clone(),
-                        PluginHandler::Builtin(PluginBuiltInType::Outbound(Arc::new(
-                            TestGlobalResponseMiddleware {
-                                hits: response_hits_clone.clone(),
-                                header_name: "x-global-response",
-                                header_value: "applied",
-                            },
-                        ))),
-                    );
-                    Ok(container)
-                },
-            )
-            .build();
+        let cardinal = cardinal_with_plugin_factory(config, move |container| {
+            container.add_plugin(
+                plugin_name_clone.clone(),
+                PluginHandler::Builtin(PluginBuiltInType::Outbound(Arc::new(
+                    TestGlobalResponseMiddleware {
+                        hits: response_hits_clone.clone(),
+                        header_name: "x-global-response",
+                        header_value: "applied",
+                    },
+                ))),
+            );
+        });
 
         let _cardinal_thread = spawn_cardinal(cardinal);
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        wait_for_startup().await;
 
-        let mut response = ureq::get(&format!("http://{}/posts/post", server_addr))
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
             .call()
             .unwrap();
         assert_eq!(response.status(), 200);
@@ -268,11 +297,15 @@ mod tests {
         let handle = runtime_handle().await;
 
         let backend_hits = Arc::new(AtomicUsize::new(0));
-        let backend_addr = "127.0.0.1:2908".to_string();
+        let middleware_hits = Arc::new(AtomicUsize::new(0));
+
+        let config = load_test_config("destination_short_circuit.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
         let backend_hits_clone = backend_hits.clone();
-        let _backend_server = create_server_with(
+        let _backend_server = spawn_backend(
+            &handle,
             backend_addr.clone(),
-            handle.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
                 let response = Response::from_string("should-not-see");
@@ -280,44 +313,28 @@ mod tests {
             })],
         );
 
-        let plugin_name = "ShortCircuitInbound".to_string();
-        let server_addr = "127.0.0.1:1808".to_string();
-        let config = load_test_config("destination_short_circuit.toml");
-
-        let middleware_hits = Arc::new(AtomicUsize::new(0));
         let middleware_hits_clone = middleware_hits.clone();
+        let plugin_name = "ShortCircuitInbound".to_string();
         let plugin_name_clone = plugin_name.clone();
-        let cardinal = Cardinal::builder(config)
-            .register_provider_with_factory::<PluginContainer, _>(
-                ProviderScope::Singleton,
-                move |_ctx| {
-                    let mut container = PluginContainer::new_empty();
-                    container.add_plugin(
-                        plugin_name_clone.clone(),
-                        PluginHandler::Builtin(PluginBuiltInType::Inbound(Arc::new(
-                            TestRequestShortCircuitMiddleware {
-                                hits: middleware_hits_clone.clone(),
-                            },
-                        ))),
-                    );
-                    Ok(container)
-                },
-            )
-            .build();
+        let cardinal = cardinal_with_plugin_factory(config, move |container| {
+            container.add_plugin(
+                plugin_name_clone.clone(),
+                PluginHandler::Builtin(PluginBuiltInType::Inbound(Arc::new(
+                    TestRequestShortCircuitMiddleware {
+                        hits: middleware_hits_clone.clone(),
+                    },
+                ))),
+            );
+        });
 
         let _cardinal_thread = spawn_cardinal(cardinal);
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        wait_for_startup().await;
 
-        let err = ureq::get(&format!("http://{}/posts/post", server_addr))
+        let err = ureq::get(&http_url(&server_addr, "/posts/post"))
             .call()
             .expect_err("expected short-circuit response");
 
-        match err {
-            UreqError::StatusCode(code) => {
-                assert_eq!(code, 418);
-            }
-            _ => panic!("unexpected error variant"),
-        };
+        expect_status(err, 418);
 
         assert_eq!(middleware_hits.load(Ordering::SeqCst), 1);
         assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
@@ -341,9 +358,9 @@ mod tests {
         let backend_hits_clone = backend_hits.clone();
         let header_value_clone = header_value.clone();
 
-        let _backend_server = create_server_with(
+        let _backend_server = spawn_backend(
+            &handle,
             backend_addr.clone(),
-            handle.clone(),
             vec![Route::new(Method::Get, "/123/detail", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
                 let expected_header = format!("{}id", CARDINAL_PARAMS_HEADER_BASE);
@@ -364,9 +381,9 @@ mod tests {
 
         let cardinal = Cardinal::new(config);
         let _cardinal_thread = spawn_cardinal(cardinal);
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        wait_for_startup().await;
 
-        let mut allowed = ureq::get(&format!("http://{}/posts/123/detail", server_addr))
+        let mut allowed = ureq::get(&http_url(&server_addr, "/posts/123/detail"))
             .call()
             .unwrap();
         assert_eq!(allowed.status(), 200);
@@ -375,16 +392,11 @@ mod tests {
         assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
         assert_eq!(header_value.lock().unwrap().as_deref(), Some("123"));
 
-        let err = ureq::get(&format!("http://{}/posts/123", server_addr))
+        let err = ureq::get(&http_url(&server_addr, "/posts/123"))
             .call()
             .expect_err("expected restricted route middleware to block request");
 
-        match err {
-            UreqError::StatusCode(code) => {
-                assert_eq!(code, 402);
-            }
-            _ => panic!("unexpected error variant"),
-        }
+        expect_status(err, 402);
 
         assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
     }
@@ -405,9 +417,9 @@ mod tests {
         let backend_hits = Arc::new(AtomicUsize::new(0));
         let backend_hits_clone = backend_hits.clone();
 
-        let _backend_server = create_server_with(
+        let _backend_server = spawn_backend(
+            &handle,
             backend_addr.clone(),
-            handle.clone(),
             vec![Route::new(Method::Get, "/123", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
                 let response = Response::from_string("should-not-hit");
@@ -417,16 +429,13 @@ mod tests {
 
         let cardinal = Cardinal::new(config);
         let _cardinal_thread = spawn_cardinal(cardinal);
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        wait_for_startup().await;
 
-        let err = ureq::get(&format!("http://{}/posts/123", server_addr))
+        let err = ureq::get(&http_url(&server_addr, "/posts/123"))
             .call()
             .expect_err("expected restricted route middleware to block request");
 
-        match err {
-            UreqError::StatusCode(code) => assert_eq!(code, 402),
-            _ => panic!("unexpected error variant"),
-        }
+        expect_status(err, 402);
 
         assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
     }
@@ -436,11 +445,11 @@ mod tests {
         let handle = runtime_handle().await;
 
         let backend_hits = Arc::new(AtomicUsize::new(0));
-        let backend_addr = "127.0.0.1:2907".to_string();
         let backend_hits_clone = backend_hits.clone();
-        let _backend_server = create_server_with(
+        let backend_addr = "127.0.0.1:2907".to_string();
+        let _backend_server = spawn_backend(
+            &handle,
             backend_addr.clone(),
-            handle.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
                 let response = Response::from_string("wasm-backend");
@@ -455,39 +464,32 @@ mod tests {
                 .unwrap_or_else(|e| panic!("failed to load wasm plugin {:?}: {}", wasm_path, e)),
         );
 
-        let plugin_name = "TestWasmResponse".to_string();
-        let server_addr = "127.0.0.1:1807".to_string();
         let config = load_test_config("wasm_response_plugin.toml");
+        let server_addr = config.server.address.clone();
 
         let response_hits = Arc::new(AtomicUsize::new(0));
         let response_hits_clone = response_hits.clone();
-        let plugin_name_clone = plugin_name.clone();
         let wasm_plugin_clone = wasm_plugin.clone();
-        let cardinal = Cardinal::builder(config)
-            .register_provider_with_factory::<PluginContainer, _>(
-                ProviderScope::Singleton,
-                move |_ctx| {
-                    let mut container = PluginContainer::new_empty();
-                    container.add_plugin(
-                        plugin_name_clone.clone(),
-                        PluginHandler::Builtin(PluginBuiltInType::Outbound(Arc::new(
-                            TestWasmResponseMiddleware::new(
-                                wasm_plugin_clone.clone(),
-                                response_hits_clone.clone(),
-                            ),
-                        ))),
-                    );
-                    Ok(container)
-                },
-            )
-            .build();
+        let plugin_name = "TestWasmResponse".to_string();
+        let plugin_name_clone = plugin_name.clone();
+        let cardinal = cardinal_with_plugin_factory(config, move |container| {
+            container.add_plugin(
+                plugin_name_clone.clone(),
+                PluginHandler::Builtin(PluginBuiltInType::Outbound(Arc::new(
+                    TestWasmResponseMiddleware::new(
+                        wasm_plugin_clone.clone(),
+                        response_hits_clone.clone(),
+                    ),
+                ))),
+            );
+        });
 
         let _cardinal_thread = spawn_cardinal(cardinal);
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        wait_for_startup().await;
 
         let mut response = ureq::get(&format!(
-            "http://{}/posts/post?tenant=cardinal",
-            server_addr
+            "{}?tenant=cardinal",
+            http_url(&server_addr, "/posts/post")
         ))
         .header("Authorization", "Bearer wasm")
         .call()

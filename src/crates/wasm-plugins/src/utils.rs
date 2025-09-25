@@ -2,7 +2,7 @@ use crate::ExecutionContext;
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use cardinal_errors::CardinalError::InternalError;
-use wasmer::{FunctionEnvMut, Memory, MemoryView};
+use wasmer::{FunctionEnvMut, MemoryView};
 
 pub(crate) fn with_mem_view<'a>(
     ctx: &'a FunctionEnvMut<ExecutionContext>,

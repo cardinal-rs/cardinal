@@ -54,7 +54,7 @@ impl WasmPlugin {
         let module = Module::new(&engine, bytes).map_err(|e| {
             CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                 "Error initiating plugin {}",
-                e.to_string()
+                e
             )))
         })?;
 

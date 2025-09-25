@@ -73,7 +73,7 @@ impl PluginRunner {
 
         for filter in self.global_request_filters() {
             let run = filter_container
-                .run_request_filter(&filter, session, backend.clone(), self.context.clone())
+                .run_request_filter(filter, session, backend.clone(), self.context.clone())
                 .await?;
             if let MiddlewareResult::Responded = run {
                 return Ok(MiddlewareResult::Responded);
@@ -109,7 +109,7 @@ impl PluginRunner {
         for filter in self.global_response_filters() {
             filter_container
                 .run_response_filter(
-                    &filter,
+                    filter,
                     session,
                     backend.clone(),
                     response,
@@ -123,7 +123,7 @@ impl PluginRunner {
             let middleware_name = &middleware.name;
             filter_container
                 .run_response_filter(
-                    &middleware_name,
+                    middleware_name,
                     session,
                     backend.clone(),
                     response,

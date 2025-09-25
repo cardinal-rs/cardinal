@@ -4,15 +4,13 @@ use crate::utils::parse_query_string_multi;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_base::provider::Provider;
-use cardinal_config::{Middleware, MiddlewareType, Plugin};
+use cardinal_config::Plugin;
 use cardinal_errors::CardinalError;
 use cardinal_wasm_plugins::plugin::WasmPlugin;
-use cardinal_wasm_plugins::runner::{ExecutionResult, ExecutionType, WasmRunner};
+use cardinal_wasm_plugins::runner::{ExecutionType, WasmRunner};
 use cardinal_wasm_plugins::{ExecutionContext, ExecutionRequest, ExecutionResponse};
-use http::{HeaderName, HeaderValue, StatusCode};
 use pingora::prelude::Session;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{error, warn};
 
@@ -106,10 +104,10 @@ impl PluginContainer {
                     let exec = runner.run(ExecutionContext::Inbound(inbound_ctx))?;
 
                     if exec.should_continue {
-                        return Ok(MiddlewareResult::Continue);
+                        Ok(MiddlewareResult::Continue)
                     } else {
                         let _ = session.respond_error(403).await;
-                        return Ok(MiddlewareResult::Responded);
+                        Ok(MiddlewareResult::Responded)
                     }
                 }
             }
@@ -181,6 +179,12 @@ impl PluginContainer {
                 }
             }
         }
+    }
+}
+
+impl Default for PluginContainer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

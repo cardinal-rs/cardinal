@@ -136,17 +136,17 @@ impl Default for ServerConfig {
 pub fn load_config(paths: &[String]) -> Result<CardinalConfig, ConfigError> {
     let builder = get_config_builder(paths)?;
     let config: CardinalConfig = builder.build()?.try_deserialize()?;
-    let _ = validate_config(&config)?;
+    validate_config(&config)?;
 
     Ok(config)
 }
 
 pub fn validate_config(config: &CardinalConfig) -> Result<(), ConfigError> {
-    if !config
+    if config
         .server
         .address
         .parse::<std::net::SocketAddr>()
-        .is_ok()
+        .is_err()
     {
         return Err(ConfigError::Message(format!(
             "Invalid server address: {}",

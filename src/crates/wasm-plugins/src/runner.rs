@@ -31,7 +31,7 @@ impl<'a> WasmRunner<'a> {
 
     pub fn run(&self, exec_ctx: ExecutionContext) -> Result<ExecutionResult, CardinalError> {
         // 1) Instantiate a fresh instance per request
-        let mut instance = WasmInstance::from_plugin(self.plugin, self.execution_type.clone())?;
+        let mut instance = WasmInstance::from_plugin(self.plugin, self.execution_type)?;
 
         {
             let ctx = instance.env.as_mut(&mut instance.store);
@@ -61,7 +61,7 @@ impl<'a> WasmRunner<'a> {
             .map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                     "missing `handle` export {}",
-                    e.to_string()
+                    e
                 )))
             })?;
 
@@ -72,7 +72,7 @@ impl<'a> WasmRunner<'a> {
             .map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                     "missing `alloc` export {}",
-                    e.to_string()
+                    e
                 )))
             })?;
 
@@ -87,7 +87,7 @@ impl<'a> WasmRunner<'a> {
             let p = alloc.call(&mut instance.store, len, 0).map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                     "Alloc failed {}",
-                    e.to_string()
+                    e
                 )))
             })?;
 
@@ -96,7 +96,7 @@ impl<'a> WasmRunner<'a> {
                 view.write(p as u64, &body).map_err(|e| {
                     CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                         "Writing Body failed {}",
-                        e.to_string()
+                        e
                     )))
                 })?;
             }
@@ -109,7 +109,7 @@ impl<'a> WasmRunner<'a> {
         let decision = handle.call(&mut instance.store, ptr, len).map_err(|e| {
             CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                 "WASM Handle call failed {}",
-                e.to_string()
+                e
             )))
         })?;
 

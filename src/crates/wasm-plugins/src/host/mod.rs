@@ -43,10 +43,8 @@ pub fn read_key_lookup_and_write(
     let bytes = val.as_bytes();
 
     let n = bytes.len().min(out_cap as usize);
-    if n > 0 {
-        if let Err(_) = write_bytes(&view, out_ptr, &bytes[..n]) {
-            return -1;
-        }
+    if n > 0 && write_bytes(&view, out_ptr, &bytes[..n]).is_err() {
+        return -1;
     }
     n as i32
 }

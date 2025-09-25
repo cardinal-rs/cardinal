@@ -45,14 +45,14 @@ impl WasmInstance {
         let instance = Instance::new(&mut store, &plugin.module, &imports).map_err(|e| {
             CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                 "Error creating WASM Instance {}",
-                e.to_string()
+                e
             )))
         })?;
 
         // Stash it in the env so host imports can access it.
         // Get the guest linear memory (usually named "memory")
         let memory_name = plugin.memory_name.as_str(); // or default to "memory"
-        let mut memory = instance
+        let memory = instance
             .exports
             .get_memory(memory_name)
             .map_err(|e| {

@@ -10,7 +10,7 @@ fn get_header_raw(
     out_cap: i32,
 ) -> i32 {
     read_key_lookup_and_write(&ctx, name_ptr, name_len, out_ptr, out_cap, true, |ecx| {
-        &ecx.req_headers
+        &ecx.req_headers()
     })
 }
 

@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use derive_builder::Builder;
+use enum_as_inner::EnumAsInner;
 use std::collections::HashMap;
 use wasmer::Memory;
 
@@ -9,16 +10,73 @@ pub mod plugin;
 pub mod runner;
 mod utils;
 
-/// Per-instance host context; we’ll extend this in the next step
-/// (headers map, status, etc.). For now it just carries `memory`.
 #[derive(Clone, Builder)]
-pub struct ExecutionContext {
+pub struct ExecutionRequest {
     pub memory: Option<Memory>,
     pub req_headers: HashMap<String, String>,
     pub query: HashMap<String, Vec<String>>,
+    pub body: Option<Bytes>,
+}
+
+#[derive(Clone, Builder)]
+pub struct ExecutionResponse {
+    pub memory: Option<Memory>,
+    pub req_headers: HashMap<String, String>,
+    pub query: HashMap<String, Vec<String>>,
+    pub body: Option<Bytes>,
+
+    // Response fields
     pub resp_headers: HashMap<String, String>,
     pub status: i32,
-    pub body: Option<Bytes>,
+}
+
+/// Per-instance host context; we’ll extend this in the next step
+/// (headers map, status, etc.). For now it just carries `memory`.
+#[derive(Clone, EnumAsInner)]
+pub enum ExecutionContext {
+    Inbound(ExecutionRequest),
+    Outbound(ExecutionResponse),
+}
+
+impl ExecutionContext {
+    pub fn replace_memory(&mut self, memory: Memory) {
+        match self {
+            ExecutionContext::Inbound(ctx) => {
+                ctx.memory.replace(memory);
+            }
+            ExecutionContext::Outbound(ctx) => {
+                ctx.memory.replace(memory);
+            }
+        }
+    }
+
+    pub fn body(&self) -> &Option<Bytes> {
+        match self {
+            ExecutionContext::Inbound(inbound) => &inbound.body,
+            ExecutionContext::Outbound(outbound) => &outbound.body,
+        }
+    }
+
+    pub fn req_headers(&self) -> &HashMap<String, String> {
+        match self {
+            ExecutionContext::Inbound(inbound) => &inbound.req_headers,
+            ExecutionContext::Outbound(outbound) => &outbound.req_headers,
+        }
+    }
+
+    pub fn query(&self) -> &HashMap<String, Vec<String>> {
+        match self {
+            ExecutionContext::Inbound(inbound) => &inbound.query,
+            ExecutionContext::Outbound(outbound) => &outbound.query,
+        }
+    }
+
+    pub fn memory(&self) -> &Option<Memory> {
+        match self {
+            ExecutionContext::Inbound(inbound) => &inbound.memory,
+            ExecutionContext::Outbound(outbound) => &outbound.memory,
+        }
+    }
 }
 
 #[cfg(test)]

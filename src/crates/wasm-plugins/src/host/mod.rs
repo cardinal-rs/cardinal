@@ -1,3 +1,4 @@
+use crate::runner::ExecutionType;
 use crate::utils::{read_bytes, with_mem_view, write_bytes};
 use crate::ExecutionContext;
 use std::collections::HashMap;
@@ -50,18 +51,25 @@ pub fn read_key_lookup_and_write(
     n as i32
 }
 
-pub fn make_imports(store: &mut Store, env: &FunctionEnv<ExecutionContext>) -> Imports {
+pub fn make_imports(
+    store: &mut Store,
+    env: &FunctionEnv<ExecutionContext>,
+    exec_type: ExecutionType,
+) -> Imports {
     let mut imports = Imports::new();
     let mut ns = Exports::new();
 
     ns.insert("abort", abort::abort(store, env));
     ns.insert("get_header", get_header::get_header(store, env));
-    ns.insert("set_header", set_header::set_header(store, env));
-    ns.insert("set_status", set_status::set_status(store, env));
     ns.insert(
         "get_query_param",
         get_query_param::get_query_param(store, env),
     );
+
+    if let ExecutionType::Outbound = exec_type {
+        ns.insert("set_header", set_header::set_header(store, env));
+        ns.insert("set_status", set_status::set_status(store, env));
+    }
 
     imports.register_namespace("env", ns);
     imports

@@ -1,6 +1,7 @@
 use crate::host::make_imports;
 use crate::plugin::WasmPlugin;
-use crate::ExecutionContext;
+use crate::runner::ExecutionType;
+use crate::{ExecutionContext, ExecutionRequest, ExecutionResponse};
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use wasmer::{FunctionEnv, Instance, Memory, Store};
@@ -13,22 +14,32 @@ pub struct WasmInstance {
 }
 
 impl WasmInstance {
-    pub fn from_plugin(plugin: &WasmPlugin) -> Result<Self, CardinalError> {
+    pub fn from_plugin(
+        plugin: &WasmPlugin,
+        exec_type: ExecutionType,
+    ) -> Result<Self, CardinalError> {
         let mut store = Store::new(plugin.engine.clone());
 
-        let env = FunctionEnv::new(
-            &mut store,
-            ExecutionContext {
+        let ctx = match exec_type {
+            ExecutionType::Inbound => ExecutionContext::Inbound(ExecutionRequest {
+                memory: None,
+                req_headers: Default::default(),
+                query: Default::default(),
+                body: None,
+            }),
+            ExecutionType::Outbound => ExecutionContext::Outbound(ExecutionResponse {
                 memory: None,
                 req_headers: Default::default(),
                 query: Default::default(),
                 resp_headers: Default::default(),
                 status: 200,
                 body: None,
-            },
-        );
+            }),
+        };
 
-        let imports = make_imports(&mut store, &env);
+        let env = FunctionEnv::new(&mut store, ctx);
+
+        let imports = make_imports(&mut store, &env, exec_type);
 
         // Create the instance.
         let instance = Instance::new(&mut store, &plugin.module, &imports).map_err(|e| {
@@ -41,7 +52,7 @@ impl WasmInstance {
         // Stash it in the env so host imports can access it.
         // Get the guest linear memory (usually named "memory")
         let memory_name = plugin.memory_name.as_str(); // or default to "memory"
-        let memory = instance
+        let mut memory = instance
             .exports
             .get_memory(memory_name)
             .map_err(|e| {
@@ -52,8 +63,7 @@ impl WasmInstance {
             })?
             .clone();
 
-        // Stash memory into the env so host imports can access it
-        env.as_mut(&mut store).memory = Some(memory.clone());
+        env.as_mut(&mut store).replace_memory(memory.clone());
 
         Ok(WasmInstance {
             store,

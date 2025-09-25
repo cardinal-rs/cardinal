@@ -2,12 +2,12 @@ use crate::ExecutionContext;
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use cardinal_errors::CardinalError::InternalError;
-use wasmer::{FunctionEnvMut, MemoryView};
+use wasmer::{FunctionEnvMut, Memory, MemoryView};
 
 pub(crate) fn with_mem_view<'a>(
     ctx: &'a FunctionEnvMut<ExecutionContext>,
 ) -> Result<MemoryView<'a>, CardinalError> {
-    let mem = ctx.data().memory.as_ref().ok_or_else(|| {
+    let mem = ctx.data().memory().as_ref().ok_or_else(|| {
         InternalError(CardinalInternalError::InvalidWasmModule(
             "memory not set".into(),
         ))

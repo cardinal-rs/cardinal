@@ -5,6 +5,12 @@ use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use wasmer::TypedFunction;
 
+#[derive(Debug, Copy, Clone)]
+pub enum ExecutionType {
+    Inbound,
+    Outbound,
+}
+
 pub struct ExecutionResult {
     pub should_continue: bool,
     pub execution_context: ExecutionContext,
@@ -12,28 +18,39 @@ pub struct ExecutionResult {
 
 pub struct WasmRunner<'a> {
     pub plugin: &'a WasmPlugin,
+    pub execution_type: ExecutionType,
 }
 
 impl<'a> WasmRunner<'a> {
-    pub fn new(plugin: &'a WasmPlugin) -> Self {
-        Self { plugin }
+    pub fn new(plugin: &'a WasmPlugin, execution_type: ExecutionType) -> Self {
+        Self {
+            plugin,
+            execution_type,
+        }
     }
 
     pub fn run(&self, exec_ctx: ExecutionContext) -> Result<ExecutionResult, CardinalError> {
         // 1) Instantiate a fresh instance per request
-        let mut instance = WasmInstance::from_plugin(self.plugin)?;
-
-        for name in instance.instance.exports.iter().map(|e| e.0.to_string()) {
-            eprintln!("export: {}", name);
-        }
+        let mut instance = WasmInstance::from_plugin(self.plugin, self.execution_type.clone())?;
 
         {
             let ctx = instance.env.as_mut(&mut instance.store);
-            ctx.req_headers = exec_ctx.req_headers;
-            ctx.resp_headers = exec_ctx.resp_headers;
-            ctx.query = exec_ctx.query;
-            ctx.body = exec_ctx.body;
-            ctx.status = 200;
+            match ctx {
+                ExecutionContext::Inbound(inbound) => {
+                    let inbound_ctx = exec_ctx.as_inbound().unwrap().to_owned();
+                    inbound.req_headers = inbound_ctx.req_headers;
+                    inbound.query = inbound_ctx.query;
+                    inbound.body = inbound_ctx.body;
+                }
+                ExecutionContext::Outbound(outbound) => {
+                    let inbound_ctx = exec_ctx.as_outbound().unwrap().to_owned();
+                    outbound.req_headers = inbound_ctx.req_headers;
+                    outbound.query = inbound_ctx.query;
+                    outbound.body = inbound_ctx.body;
+                    outbound.resp_headers = inbound_ctx.resp_headers;
+                    outbound.status = inbound_ctx.status;
+                }
+            }
         }
 
         // 3) Get exports
@@ -61,7 +78,7 @@ impl<'a> WasmRunner<'a> {
 
         let body_opt = {
             let ctx_ref = instance.env.as_ref(&instance.store);
-            ctx_ref.body.clone()
+            ctx_ref.body().clone()
         };
 
         let (ptr, len) = if let Some(body) = body_opt.filter(|b| !b.is_empty()) {

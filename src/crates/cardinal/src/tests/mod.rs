@@ -444,9 +444,12 @@ mod tests {
     async fn wasm_response_plugin_injects_headers() {
         let handle = runtime_handle().await;
 
+        let config = load_test_config("wasm_response_plugin.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
         let backend_hits = Arc::new(AtomicUsize::new(0));
         let backend_hits_clone = backend_hits.clone();
-        let backend_addr = "127.0.0.1:2907".to_string();
         let _backend_server = spawn_backend(
             &handle,
             backend_addr.clone(),
@@ -457,32 +460,7 @@ mod tests {
             })],
         );
 
-        let wasm_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../tests/wasm-plugins/allow/plugin.wasm");
-        let wasm_plugin = Arc::new(
-            WasmPlugin::from_path(&wasm_path)
-                .unwrap_or_else(|e| panic!("failed to load wasm plugin {:?}: {}", wasm_path, e)),
-        );
-
-        let config = load_test_config("wasm_response_plugin.toml");
-        let server_addr = config.server.address.clone();
-
-        let response_hits = Arc::new(AtomicUsize::new(0));
-        let response_hits_clone = response_hits.clone();
-        let wasm_plugin_clone = wasm_plugin.clone();
-        let plugin_name = "TestWasmResponse".to_string();
-        let plugin_name_clone = plugin_name.clone();
-        let cardinal = cardinal_with_plugin_factory(config, move |container| {
-            container.add_plugin(
-                plugin_name_clone.clone(),
-                PluginHandler::Builtin(PluginBuiltInType::Outbound(Arc::new(
-                    TestWasmResponseMiddleware::new(
-                        wasm_plugin_clone.clone(),
-                        response_hits_clone.clone(),
-                    ),
-                ))),
-            );
-        });
+        let cardinal = Cardinal::new(config);
 
         let _cardinal_thread = spawn_cardinal(cardinal);
         wait_for_startup().await;
@@ -492,11 +470,15 @@ mod tests {
             http_url(&server_addr, "/posts/post")
         ))
         .header("Authorization", "Bearer wasm")
-        .call()
-        .unwrap();
+        .call();
+
+        println!("{:?}", response);
+
+        let mut response = response.unwrap();
 
         assert_eq!(response.status(), 200);
         let headers = response.headers();
+        println!("{:?}", headers);
         let decision = headers
             .get("x-decision")
             .and_then(|v| v.to_str().ok())
@@ -516,8 +498,6 @@ mod tests {
 
         let body = response.body_mut().read_to_string().unwrap();
         assert_eq!(body, "wasm-backend");
-
-        assert_eq!(response_hits.load(Ordering::SeqCst), 1);
         assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
     }
 
@@ -579,70 +559,6 @@ mod tests {
             self.hits.fetch_add(1, Ordering::SeqCst);
             let _ = session.respond_error(418).await;
             Ok(MiddlewareResult::Responded)
-        }
-    }
-
-    struct TestWasmResponseMiddleware {
-        plugin: Arc<WasmPlugin>,
-        hits: Arc<AtomicUsize>,
-    }
-
-    impl TestWasmResponseMiddleware {
-        fn new(plugin: Arc<WasmPlugin>, hits: Arc<AtomicUsize>) -> Self {
-            Self { plugin, hits }
-        }
-    }
-
-    #[async_trait]
-    impl ResponseMiddleware for TestWasmResponseMiddleware {
-        async fn on_response(
-            &self,
-            session: &mut Session,
-            _backend: Arc<DestinationWrapper>,
-            response: &mut pingora::http::ResponseHeader,
-            _cardinal: Arc<CardinalContext>,
-        ) {
-            self.hits.fetch_add(1, Ordering::SeqCst);
-
-            let mut req_headers: HashMap<String, String> = HashMap::new();
-            for (name, value) in session.req_header().headers.iter() {
-                if let Ok(val) = value.to_str() {
-                    req_headers.insert(name.to_string().to_ascii_lowercase(), val.to_string());
-                }
-            }
-
-            let query_raw = session.req_header().uri.query().unwrap_or("");
-            let query = parse_query_string_multi(query_raw)
-                .into_iter()
-                .map(|(k, v)| (k.to_ascii_lowercase(), v))
-                .collect::<HashMap<_, _>>();
-
-            let exec_ctx = ExecutionContext {
-                memory: None,
-                req_headers,
-                query,
-                resp_headers: HashMap::new(),
-                status: response.status.as_u16() as i32,
-                body: None,
-            };
-
-            if let Ok(result) = WasmRunner::new(&self.plugin).run(exec_ctx) {
-                let status = result.execution_context.status as u16;
-                if status != response.status.as_u16() {
-                    let _ = response.set_status(status);
-                }
-
-                let headers: Vec<(String, String)> = result
-                    .execution_context
-                    .resp_headers
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-
-                for (name, value) in headers {
-                    let _ = response.insert_header(name, value);
-                }
-            }
         }
     }
 }

@@ -82,14 +82,8 @@ impl PluginRunner {
 
         let inbound_middleware = backend.get_inbound_middleware();
         for middleware in inbound_middleware {
-            let middleware_name = &middleware.name;
             let run = filter_container
-                .run_request_filter(
-                    middleware_name,
-                    session,
-                    backend.clone(),
-                    self.context.clone(),
-                )
+                .run_request_filter(&middleware.name, session, backend.clone(), self.context.clone())
                 .await?;
             if let MiddlewareResult::Responded = run {
                 return Ok(MiddlewareResult::Responded);

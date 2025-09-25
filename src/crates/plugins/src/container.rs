@@ -4,11 +4,11 @@ use crate::utils::parse_query_string_multi;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_base::provider::Provider;
-use cardinal_config::Plugin;
+use cardinal_config::{Middleware, MiddlewareType, Plugin};
 use cardinal_errors::CardinalError;
 use cardinal_wasm_plugins::plugin::WasmPlugin;
-use cardinal_wasm_plugins::runner::WasmRunner;
-use cardinal_wasm_plugins::ExecutionContext;
+use cardinal_wasm_plugins::runner::{ExecutionType, WasmRunner};
+use cardinal_wasm_plugins::{ExecutionContext, ExecutionRequest, ExecutionResponse};
 use pingora::prelude::Session;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -65,6 +65,7 @@ impl PluginContainer {
         backend: Arc<DestinationWrapper>,
         ctx: Arc<CardinalContext>,
     ) -> Result<MiddlewareResult, CardinalError> {
+
         let plugin = self
             .plugins
             .get(name)
@@ -87,19 +88,21 @@ impl PluginContainer {
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
                     .collect();
+
                 let query =
                     parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
 
                 {
-                    let runner = WasmRunner::new(wasm);
-                    let exec = runner.run(ExecutionContext {
+                    let runner = WasmRunner::new(wasm, ExecutionType::Inbound);
+
+                    let inbound_ctx = ExecutionRequest {
+                        query,
                         memory: None,
                         req_headers: get_req_headers,
-                        query,
-                        resp_headers: Default::default(),
-                        status: 0,
                         body: None,
-                    })?;
+                    };
+
+                    let exec = runner.run(ExecutionContext::Inbound(inbound_ctx))?;
 
                     if exec.should_continue {
                         return Ok(MiddlewareResult::Continue);
@@ -145,15 +148,18 @@ impl PluginContainer {
                         parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
 
                     {
-                        let runner = WasmRunner::new(wasm);
-                        let exec = runner.run(ExecutionContext {
+                        let runner = WasmRunner::new(wasm, ExecutionType::Outbound);
+
+                        let outbound_ctx = ExecutionResponse {
                             memory: None,
                             req_headers: get_req_headers,
                             query,
                             resp_headers: Default::default(),
                             status: 0,
                             body: None,
-                        });
+                        };
+
+                        let exec = runner.run(ExecutionContext::Outbound(outbound_ctx));
 
                         if let Ok(exec) = exec {
                             if exec.should_continue {
@@ -179,9 +185,9 @@ impl Provider for PluginContainer {
             let plugin_name = plugin.name();
             let plugin_exists = plugin_container.plugins.contains_key(plugin_name);
 
-            if !plugin_exists {
+            if plugin_exists {
                 return Err(CardinalError::Other(format!(
-                    "Failed to initiate plugin container. Plugin {} does not exist",
+                    "Plugin {} already exists. Please choose a different name",
                     plugin_name
                 )));
             }

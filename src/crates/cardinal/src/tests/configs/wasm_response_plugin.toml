@@ -3,7 +3,7 @@ address = "127.0.0.1:1807"
 force_path_parameter = true
 log_upstream_response = false
 global_request_middleware = []
-global_response_middleware = ["TestWasmResponse"]
+global_response_middleware = ["allow"]
 
 [destinations.posts]
 name = "posts"
@@ -12,4 +12,4 @@ routes = []
 middleware = []
 
 [[plugins]]
-builtin = { name = "TestWasmResponse" }
+wasm = { name = "allow", path = "../../../tests/wasm-plugins/allow/plugin.wasm" }

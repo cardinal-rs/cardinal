@@ -17,3 +17,5 @@ derive_builder.workspace = true
 serde = { workspace = true, features = ["derive"] }
 bytes = "1.10.1"
 serde_json = "1.0"
+enum-as-inner = "0.6.1"
+tracing.workspace = true

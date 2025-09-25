@@ -509,9 +509,7 @@ mod tests {
         let backend_addr = destination_url(&config, "posts");
 
         let backend_hits = Arc::new(AtomicUsize::new(0));
-        let recorded_header: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let hits_clone = backend_hits.clone();
-        let header_clone = recorded_header.clone();
 
         let _backend_server = spawn_backend(
             &handle,
@@ -525,9 +523,12 @@ mod tests {
                         None
                     }
                 });
-                *header_clone.lock().unwrap() = header.clone();
 
-                let response = Response::from_string("inbound-ok");
+                let response = if let Some(value) = header {
+                    Response::from_string(value)
+                } else {
+                    Response::from_string("missing").with_status_code(500)
+                };
                 let _ = request.respond(response);
             })],
         );
@@ -543,9 +544,8 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         let body = response.body_mut().read_to_string().unwrap();
-        assert_eq!(body, "inbound-ok");
+        assert_eq!(body, "true");
         assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
-        assert_eq!(recorded_header.lock().unwrap().as_deref(), Some("true"));
     }
 
     #[tokio::test]
@@ -556,24 +556,13 @@ mod tests {
         let backend_addr = destination_url(&config, "posts");
 
         let backend_hits = Arc::new(AtomicUsize::new(0));
-        let recorded_header: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let hits_clone = backend_hits.clone();
-        let header_clone = recorded_header.clone();
 
         let _backend_server = spawn_backend(
             &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 hits_clone.fetch_add(1, Ordering::SeqCst);
-                let header = request.headers().iter().find_map(|h| {
-                    if h.field.equiv("x-allow") {
-                        Some(h.value.as_str().to_string())
-                    } else {
-                        None
-                    }
-                });
-                *header_clone.lock().unwrap() = header.clone();
-
                 let response = Response::from_string("unexpected");
                 let _ = request.respond(response);
             })],
@@ -590,7 +579,6 @@ mod tests {
         expect_status(err, 403);
 
         assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
-        assert!(recorded_header.lock().unwrap().is_none());
     }
 
     #[tokio::test]

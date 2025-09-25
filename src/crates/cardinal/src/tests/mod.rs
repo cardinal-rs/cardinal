@@ -446,7 +446,7 @@ mod tests {
         );
 
         let wasm_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/wasm-plugins/allow/plugin.wasm");
+            .join("../../../tests/wasm-plugins/allow/plugin.wasm");
         let wasm_plugin = Arc::new(
             WasmPlugin::from_path(&wasm_path)
                 .unwrap_or_else(|e| panic!("failed to load wasm plugin {:?}: {}", wasm_path, e)),

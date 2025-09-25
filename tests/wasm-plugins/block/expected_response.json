@@ -1,4 +1,5 @@
 {
+  "execution_type": "outbound",
   "should_continue": false,
   "status": 403,
   "resp_headers": {

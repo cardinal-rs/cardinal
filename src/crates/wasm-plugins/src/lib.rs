@@ -83,7 +83,7 @@ impl ExecutionContext {
 mod tests {
     use super::*;
     use crate::plugin::WasmPlugin;
-    use crate::runner::WasmRunner;
+    use crate::runner::{ExecutionType, WasmRunner};
     use bytes::Bytes;
     use serde_json::Value;
     use std::collections::HashMap;
@@ -94,20 +94,30 @@ mod tests {
 
     #[test]
     fn wasm_plugin_allow_sets_headers() {
-        run_case("allow");
+        run_wasm_case("allow", ExecutionType::Outbound);
     }
 
     #[test]
     fn wasm_plugin_blocks_flagged_requests() {
-        run_case("block");
+        run_wasm_case("block", ExecutionType::Outbound);
     }
 
     #[test]
     fn wasm_plugin_requires_tenant() {
-        run_case("require-tenant");
+        run_wasm_case("require-tenant", ExecutionType::Outbound);
     }
 
-    fn run_case(name: &str) {
+    #[test]
+    fn wasm_inbound_plugin_allows_when_header_present() {
+        run_wasm_case("inbound-allow", ExecutionType::Inbound);
+    }
+
+    #[test]
+    fn wasm_inbound_plugin_blocks_without_header() {
+        run_wasm_case("inbound-block", ExecutionType::Inbound);
+    }
+
+    fn run_wasm_case(name: &str, expected_type: ExecutionType) {
         let case_dir = case_path(name);
         let wasm_path = case_dir.join("plugin.wasm");
         let incoming_path = case_dir.join("incoming_request.json");
@@ -119,10 +129,21 @@ mod tests {
         let incoming = load_json(&incoming_path);
         let expected = load_json(&expected_path);
 
-        let exec_ctx = execution_context_from_value(&incoming);
-        let expected = expected_response_from_value(&expected);
+        let expected = expected_response_from_value(&expected, name);
+        if !matches!(
+            (expected.execution_type, expected_type),
+            (ExecutionType::Inbound, ExecutionType::Inbound)
+                | (ExecutionType::Outbound, ExecutionType::Outbound)
+        ) {
+            panic!(
+                "fixture {} declares execution_type {:?} but test expected {:?}",
+                name, expected.execution_type, expected_type
+            );
+        }
 
-        let runner = WasmRunner::new(&wasm_plugin);
+        let exec_ctx = execution_context_from_value(&incoming, expected.execution_type, name);
+
+        let runner = WasmRunner::new(&wasm_plugin, expected.execution_type);
         let result = runner
             .run(exec_ctx)
             .unwrap_or_else(|e| panic!("plugin execution failed for {:?}: {}", wasm_path, e));
@@ -132,18 +153,54 @@ mod tests {
             "decision mismatch for {}",
             name
         );
-        assert_eq!(
-            result.execution_context.status, expected.status,
-            "status mismatch for {}",
-            name
-        );
+        match expected.execution_type {
+            ExecutionType::Outbound => {
+                let outbound = result
+                    .execution_context
+                    .into_outbound()
+                    .unwrap_or_else(|_| panic!("expected outbound context for {}", name));
 
-        let actual_headers = lowercase_string_map(result.execution_context.resp_headers.clone());
-        for (key, value) in expected.resp_headers.iter() {
-            let actual = actual_headers
-                .get(key)
-                .unwrap_or_else(|| panic!("missing header `{}` for {}", key, name));
-            assert_eq!(actual, value, "header `{}` mismatch for {}", key, name);
+                let expected_status = expected.status.unwrap_or_else(|| {
+                    panic!(
+                        "outbound fixture {} must define a status field in expected_response.json",
+                        name
+                    )
+                });
+                assert_eq!(
+                    outbound.status, expected_status,
+                    "status mismatch for {}",
+                    name
+                );
+
+                let actual_headers = lowercase_string_map(outbound.resp_headers.clone());
+                for (key, value) in expected.resp_headers.iter() {
+                    let actual = actual_headers
+                        .get(key)
+                        .unwrap_or_else(|| panic!("missing header `{}` for {}", key, name));
+                    assert_eq!(actual, value, "header `{}` mismatch for {}", key, name);
+                }
+            }
+            ExecutionType::Inbound => {
+                let inbound = result
+                    .execution_context
+                    .into_inbound()
+                    .unwrap_or_else(|_| panic!("expected inbound context for {}", name));
+
+                assert!(
+                    expected.status.is_none(),
+                    "inbound fixture {} should not define a status field",
+                    name
+                );
+
+                assert!(
+                    expected.resp_headers.is_empty(),
+                    "inbound fixture {} should not define resp_headers",
+                    name
+                );
+
+                // No header mutation assertions yet; inbound plugins under test only read state.
+                let _inbound = inbound;
+            }
         }
     }
 
@@ -159,35 +216,63 @@ mod tests {
         serde_json::from_str(&data).unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e))
     }
 
-    fn execution_context_from_value(value: &Value) -> ExecutionContext {
+    fn execution_context_from_value(
+        value: &Value,
+        exec_type: ExecutionType,
+        scenario: &str,
+    ) -> ExecutionContext {
         let req_headers = lowercase_string_map(json_string_map(value.get("req_headers")));
         let query = lowercase_string_vec_map(json_string_vec_map(value.get("query")));
-        let resp_headers = lowercase_string_map(json_string_map(value.get("resp_headers")));
-        let status = value.get("status").and_then(Value::as_i64).unwrap_or(0) as i32;
         let body = value.get("body").and_then(body_from_value);
 
-        ExecutionContext {
-            memory: None,
-            req_headers,
-            query,
-            resp_headers,
-            status,
-            body,
+        match exec_type {
+            ExecutionType::Inbound => ExecutionContext::Inbound(ExecutionRequest {
+                memory: None,
+                req_headers,
+                query,
+                body,
+            }),
+            ExecutionType::Outbound => {
+                let resp_headers = lowercase_string_map(json_string_map(value.get("resp_headers")));
+                let status = value
+                    .get("status")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "outbound fixture {} must define a numeric status field",
+                            scenario
+                        )
+                    }) as i32;
+
+                ExecutionContext::Outbound(ExecutionResponse {
+                    memory: None,
+                    req_headers,
+                    query,
+                    body,
+                    resp_headers,
+                    status,
+                })
+            }
         }
     }
 
-    fn expected_response_from_value(value: &Value) -> ExpectedResponse {
+    fn expected_response_from_value(value: &Value, scenario: &str) -> ExpectedResponse {
         let should_continue = value
             .get("should_continue")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let status = value.get("status").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let execution_type = execution_type_from_value(value.get("execution_type"), scenario);
+        let status = value
+            .get("status")
+            .and_then(Value::as_i64)
+            .map(|s| s as i32);
         let resp_headers = lowercase_string_map(json_string_map(value.get("resp_headers")));
 
         ExpectedResponse {
             should_continue,
             status,
             resp_headers,
+            execution_type,
         }
     }
 
@@ -244,7 +329,23 @@ mod tests {
 
     struct ExpectedResponse {
         should_continue: bool,
-        status: i32,
+        status: Option<i32>,
         resp_headers: HashMap<String, String>,
+        execution_type: ExecutionType,
+    }
+
+    fn execution_type_from_value(value: Option<&Value>, scenario: &str) -> ExecutionType {
+        let raw = value
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("fixture {} must define execution_type", scenario));
+
+        match raw.to_ascii_lowercase().as_str() {
+            "inbound" => ExecutionType::Inbound,
+            "outbound" => ExecutionType::Outbound,
+            other => panic!(
+                "fixture {} has invalid execution_type '{}'; expected 'inbound' or 'outbound'",
+                scenario, other
+            ),
+        }
     }
 }

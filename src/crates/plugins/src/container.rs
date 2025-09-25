@@ -65,7 +65,6 @@ impl PluginContainer {
         backend: Arc<DestinationWrapper>,
         ctx: Arc<CardinalContext>,
     ) -> Result<MiddlewareResult, CardinalError> {
-
         let plugin = self
             .plugins
             .get(name)

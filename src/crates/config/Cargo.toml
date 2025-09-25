@@ -8,7 +8,7 @@ homepage.workspace = true
 authors.workspace = true
 description = "Configuration loader and validator for the Cardinal gateway"
 keywords = ["configuration", "gateway", "toml"]
-categories = ["development-tools"]
+categories = ["config", "development-tools"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

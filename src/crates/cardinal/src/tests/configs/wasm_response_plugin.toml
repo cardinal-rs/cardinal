@@ -1,0 +1,15 @@
+[server]
+address = "127.0.0.1:1807"
+force_path_parameter = true
+log_upstream_response = false
+global_request_middleware = []
+global_response_middleware = ["TestWasmResponse"]
+
+[destinations.posts]
+name = "posts"
+url = "127.0.0.1:2907"
+routes = []
+middleware = []
+
+[[plugins]]
+builtin = { name = "TestWasmResponse" }

@@ -8,10 +8,7 @@ mod tests {
     use cardinal_base::context::CardinalContext;
     use cardinal_base::destinations::container::DestinationWrapper;
     use cardinal_base::provider::ProviderScope;
-    use cardinal_config::{
-        BuiltinPlugin, CardinalConfigBuilder, Destination, Middleware, MiddlewareType, Plugin,
-        ServerConfigBuilder,
-    };
+    use cardinal_config::{load_config, CardinalConfig};
     use cardinal_errors::CardinalError;
     use cardinal_plugins::container::{PluginBuiltInType, PluginContainer, PluginHandler};
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
@@ -20,8 +17,8 @@ mod tests {
     use cardinal_wasm_plugins::runner::WasmRunner;
     use cardinal_wasm_plugins::ExecutionContext;
     use pingora::proxy::Session;
-    use std::collections::{BTreeMap, HashMap};
-    use std::path::Path;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
     use std::thread::JoinHandle;
@@ -58,45 +55,20 @@ mod tests {
         SERVER.get_or_init(create_cardinal_ins)
     }
 
+    fn get_running_folder() -> PathBuf {
+        std::env::current_dir().unwrap_or(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    }
+
+    fn load_test_config(name: &str) -> CardinalConfig {
+        let path = get_running_folder().join("src/tests/configs").join(name);
+
+        let path_str = path.to_string_lossy().to_string();
+        load_config(&[path_str]).expect("failed to load test config")
+    }
+
     fn create_cardinal_ins() -> Mutex<std::thread::JoinHandle<()>> {
-        let cardinal = Cardinal::new(
-            CardinalConfigBuilder::default()
-                .server(
-                    ServerConfigBuilder::default()
-                        .address("127.0.0.1:1704".to_string())
-                        .force_path_parameter(true)
-                        .log_upstream_response(true)
-                        .global_request_middleware(vec![])
-                        .global_response_middleware(vec![])
-                        .build()
-                        .unwrap(),
-                )
-                .destinations(BTreeMap::from_iter(vec![
-                    (
-                        "posts".to_string(),
-                        Destination {
-                            name: "posts".to_string(),
-                            url: "127.0.0.1:9995".to_string(),
-                            health_check: None,
-                            routes: vec![],
-                            middleware: vec![],
-                        },
-                    ),
-                    (
-                        "auth".to_string(),
-                        Destination {
-                            name: "auth".to_string(),
-                            url: "127.0.0.1:9992".to_string(),
-                            health_check: None,
-                            routes: vec![],
-                            middleware: vec![],
-                        },
-                    ),
-                ]))
-                .plugins(vec![])
-                .build()
-                .unwrap(),
-        );
+        let config = load_test_config("cardinal_default.toml");
+        let cardinal = Cardinal::new(config);
 
         let handle = std::thread::spawn(move || {
             cardinal.run().unwrap();
@@ -191,32 +163,7 @@ mod tests {
 
         let plugin_name = "TestGlobalRequest".to_string();
         let server_addr = "127.0.0.1:1805".to_string();
-        let config = CardinalConfigBuilder::default()
-            .server(
-                ServerConfigBuilder::default()
-                    .address(server_addr.clone())
-                    .force_path_parameter(true)
-                    .log_upstream_response(false)
-                    .global_request_middleware(vec![plugin_name.clone()])
-                    .global_response_middleware(vec![])
-                    .build()
-                    .unwrap(),
-            )
-            .destinations(BTreeMap::from_iter([(
-                "posts".to_string(),
-                Destination {
-                    name: "posts".to_string(),
-                    url: backend_addr.clone(),
-                    health_check: None,
-                    routes: vec![],
-                    middleware: vec![],
-                },
-            )]))
-            .plugins(vec![Plugin::Builtin(BuiltinPlugin {
-                name: plugin_name.clone(),
-            })])
-            .build()
-            .unwrap();
+        let config = load_test_config("global_request_middleware.toml");
 
         let request_hits_clone = request_hits.clone();
         let plugin_name_clone = plugin_name.clone();
@@ -271,32 +218,7 @@ mod tests {
 
         let plugin_name = "TestGlobalResponse".to_string();
         let server_addr = "127.0.0.1:1806".to_string();
-        let config = CardinalConfigBuilder::default()
-            .server(
-                ServerConfigBuilder::default()
-                    .address(server_addr.clone())
-                    .force_path_parameter(true)
-                    .log_upstream_response(false)
-                    .global_request_middleware(vec![])
-                    .global_response_middleware(vec![plugin_name.clone()])
-                    .build()
-                    .unwrap(),
-            )
-            .destinations(BTreeMap::from_iter([(
-                "posts".to_string(),
-                Destination {
-                    name: "posts".to_string(),
-                    url: backend_addr.clone(),
-                    health_check: None,
-                    routes: vec![],
-                    middleware: vec![],
-                },
-            )]))
-            .plugins(vec![Plugin::Builtin(BuiltinPlugin {
-                name: plugin_name.clone(),
-            })])
-            .build()
-            .unwrap();
+        let config = load_test_config("global_response_middleware.toml");
 
         let response_hits = Arc::new(AtomicUsize::new(0));
         let response_hits_clone = response_hits.clone();
@@ -359,35 +281,7 @@ mod tests {
 
         let plugin_name = "ShortCircuitInbound".to_string();
         let server_addr = "127.0.0.1:1808".to_string();
-        let config = CardinalConfigBuilder::default()
-            .server(
-                ServerConfigBuilder::default()
-                    .address(server_addr.clone())
-                    .force_path_parameter(true)
-                    .log_upstream_response(false)
-                    .global_request_middleware(vec![])
-                    .global_response_middleware(vec![])
-                    .build()
-                    .unwrap(),
-            )
-            .destinations(BTreeMap::from_iter([(
-                "posts".to_string(),
-                Destination {
-                    name: "posts".to_string(),
-                    url: backend_addr.clone(),
-                    health_check: None,
-                    routes: vec![],
-                    middleware: vec![Middleware {
-                        r#type: MiddlewareType::Inbound,
-                        name: plugin_name.clone(),
-                    }],
-                },
-            )]))
-            .plugins(vec![Plugin::Builtin(BuiltinPlugin {
-                name: plugin_name.clone(),
-            })])
-            .build()
-            .unwrap();
+        let config = load_test_config("destination_short_circuit.toml");
 
         let middleware_hits = Arc::new(AtomicUsize::new(0));
         let middleware_hits_clone = middleware_hits.clone();
@@ -454,32 +348,7 @@ mod tests {
 
         let plugin_name = "TestWasmResponse".to_string();
         let server_addr = "127.0.0.1:1807".to_string();
-        let config = CardinalConfigBuilder::default()
-            .server(
-                ServerConfigBuilder::default()
-                    .address(server_addr.clone())
-                    .force_path_parameter(true)
-                    .log_upstream_response(false)
-                    .global_request_middleware(vec![])
-                    .global_response_middleware(vec![plugin_name.clone()])
-                    .build()
-                    .unwrap(),
-            )
-            .destinations(BTreeMap::from_iter([(
-                "posts".to_string(),
-                Destination {
-                    name: "posts".to_string(),
-                    url: backend_addr.clone(),
-                    health_check: None,
-                    routes: vec![],
-                    middleware: vec![],
-                },
-            )]))
-            .plugins(vec![Plugin::Builtin(BuiltinPlugin {
-                name: plugin_name.clone(),
-            })])
-            .build()
-            .unwrap();
+        let config = load_test_config("wasm_response_plugin.toml");
 
         let response_hits = Arc::new(AtomicUsize::new(0));
         let response_hits_clone = response_hits.clone();

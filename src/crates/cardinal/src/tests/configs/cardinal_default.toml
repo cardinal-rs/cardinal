@@ -1,0 +1,20 @@
+[server]
+address = "127.0.0.1:1704"
+force_path_parameter = true
+log_upstream_response = true
+global_request_middleware = []
+global_response_middleware = []
+
+[destinations.posts]
+name = "posts"
+url = "127.0.0.1:9995"
+routes = []
+middleware = []
+
+[destinations.auth]
+name = "auth"
+url = "127.0.0.1:9992"
+routes = []
+middleware = []
+
+plugins = []

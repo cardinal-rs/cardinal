@@ -9,4 +9,4 @@ clippy:
     cargo clippy --all-features -- -D warnings
 
 cargo-test:
-    cargp test --all-features
+    cargo test --all-features

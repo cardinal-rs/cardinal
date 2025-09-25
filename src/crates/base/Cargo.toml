@@ -13,7 +13,6 @@ categories = ["development-tools", "network-programming"]
 [dependencies]
 tokio.workspace = true
 async-trait.workspace = true
-tracing.workspace = true
 cardinal-config = { path = "../config" }
 cardinal-errors = { path = "../errors" }
 matchit.workspace = true

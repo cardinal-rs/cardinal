@@ -17,7 +17,6 @@ cardinal-errors = { path = "../errors" }
 cardinal-proxy = { path = "../proxy" }
 cardinal-plugins = { path = "../plugins" }
 tracing.workspace = true
-parking_lot.workspace = true
 pingora.workspace = true
 tokio.workspace = true
 

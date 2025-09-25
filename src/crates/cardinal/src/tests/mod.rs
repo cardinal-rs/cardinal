@@ -14,6 +14,7 @@ mod tests {
     use cardinal_plugins::headers::CARDINAL_PARAMS_HEADER_BASE;
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
     use cardinal_plugins::utils::parse_query_string_multi;
+    use cardinal_proxy::CardinalContextProvider;
     use cardinal_wasm_plugins::plugin::WasmPlugin;
     use cardinal_wasm_plugins::runner::WasmRunner;
     use cardinal_wasm_plugins::ExecutionContext;
@@ -660,10 +661,132 @@ mod tests {
         assert_eq!(body, "outbound-skip");
     }
 
+    #[tokio::test]
+    async fn context_provider_resolve_allows_request() {
+        let handle = runtime_handle().await;
+        let config = load_test_config("context_provider_missing.toml");
+        let builder = Cardinal::builder(config);
+        let context = builder.context();
+        let server_addr = context.config.server.address.clone();
+        let backend_addr = context
+            .config
+            .destinations
+            .get("posts")
+            .expect("posts destination")
+            .url
+            .clone();
+
+        let resolves = Arc::new(AtomicUsize::new(0));
+        let provider: Arc<dyn CardinalContextProvider> = Arc::new(TestContextProvider::new(
+            Some(context.clone()),
+            resolves.clone(),
+        ));
+        let cardinal = builder.with_context_provider(provider.clone()).build();
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            &handle,
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let header = request.headers().iter().find_map(|h| {
+                    if h.field.equiv("x-allow") {
+                        Some(h.value.as_str().to_string())
+                    } else {
+                        None
+                    }
+                });
+                let value = header.unwrap_or_else(|| "missing".to_string());
+                let response = Response::from_string(value);
+                let _ = request.respond(response);
+            })],
+        );
+
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .header("x-allow", "true")
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "true");
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(resolves.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn context_provider_missing_returns_421() {
+        let handle = runtime_handle().await;
+        let config = load_test_config("context_provider.toml");
+        let builder = Cardinal::builder(config);
+        let context = builder.context();
+        let server_addr = context.config.server.address.clone();
+        let backend_addr = context
+            .config
+            .destinations
+            .get("posts")
+            .expect("posts destination")
+            .url
+            .clone();
+
+        let resolves = Arc::new(AtomicUsize::new(0));
+        let provider: Arc<dyn CardinalContextProvider> =
+            Arc::new(TestContextProvider::new(None, resolves.clone()));
+        let cardinal = builder.with_context_provider(provider.clone()).build();
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            &handle,
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("should-not-hit");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let err = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .expect_err("expected 421 when context provider returns None");
+
+        expect_status(err, 421);
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
+        assert_eq!(resolves.load(Ordering::SeqCst), 1);
+    }
+
     fn spawn_cardinal(cardinal: Cardinal) -> JoinHandle<()> {
         std::thread::spawn(move || {
             cardinal.run().unwrap();
         })
+    }
+
+    struct TestContextProvider {
+        context: Option<Arc<CardinalContext>>,
+        resolve_count: Arc<AtomicUsize>,
+    }
+
+    impl TestContextProvider {
+        fn new(context: Option<Arc<CardinalContext>>, resolve_count: Arc<AtomicUsize>) -> Self {
+            Self {
+                context,
+                resolve_count,
+            }
+        }
+    }
+
+    impl CardinalContextProvider for TestContextProvider {
+        fn resolve(&self, _session: &Session) -> Option<Arc<CardinalContext>> {
+            self.resolve_count.fetch_add(1, Ordering::SeqCst);
+            self.context.as_ref().map(Arc::clone)
+        }
     }
 
     struct TestGlobalRequestMiddleware {

@@ -7,13 +7,14 @@ use cardinal_config::{load_config, CardinalConfig};
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use cardinal_plugins::container::PluginContainer;
-use cardinal_proxy::CardinalProxy;
+use cardinal_proxy::{CardinalContextProvider, CardinalProxy, StaticContextProvider};
 use pingora::prelude::Server;
 use pingora::proxy::http_proxy_service;
 use std::sync::Arc;
 
 pub struct Cardinal {
     context: Arc<CardinalContext>,
+    context_provider: Arc<dyn CardinalContextProvider>,
 }
 
 impl Cardinal {
@@ -41,7 +42,7 @@ impl Cardinal {
         })?;
         server.bootstrap();
 
-        let proxy = CardinalProxy::builder(self.context.clone()).build();
+        let proxy = CardinalProxy::with_provider(self.context_provider.clone());
         let mut proxy_service = http_proxy_service(&server.configuration, proxy);
 
         let server_addr = self.context.config.server.address.clone();
@@ -58,6 +59,7 @@ impl Cardinal {
 pub struct CardinalBuilder {
     context: Arc<CardinalContext>,
     auto_register_defaults: bool,
+    context_provider: Option<Arc<dyn CardinalContextProvider>>,
 }
 
 impl CardinalBuilder {
@@ -66,6 +68,7 @@ impl CardinalBuilder {
         Self {
             context,
             auto_register_defaults: true,
+            context_provider: None,
         }
     }
 
@@ -74,6 +77,7 @@ impl CardinalBuilder {
         Self {
             context,
             auto_register_defaults: false,
+            context_provider: None,
         }
     }
 
@@ -118,6 +122,11 @@ impl CardinalBuilder {
         self
     }
 
+    pub fn with_context_provider(mut self, provider: Arc<dyn CardinalContextProvider>) -> Self {
+        self.context_provider = Some(provider);
+        self
+    }
+
     pub fn build(self) -> Cardinal {
         if self.auto_register_defaults {
             if !self.context.is_registered::<DestinationContainer>() {
@@ -131,8 +140,13 @@ impl CardinalBuilder {
             }
         }
 
+        let provider = self
+            .context_provider
+            .unwrap_or_else(|| Arc::new(StaticContextProvider::new(self.context.clone())));
+
         Cardinal {
             context: self.context,
+            context_provider: provider,
         }
     }
 }

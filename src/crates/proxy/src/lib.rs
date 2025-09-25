@@ -13,14 +13,38 @@ use pingora::upstreams::peer::Peer;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-pub struct CardinalProxy {
+pub trait CardinalContextProvider: Send + Sync {
+    fn resolve(&self, session: &Session) -> Option<Arc<CardinalContext>>;
+}
+
+#[derive(Clone)]
+pub struct StaticContextProvider {
     context: Arc<CardinalContext>,
-    filters: Arc<PluginRunner>,
+}
+
+impl StaticContextProvider {
+    pub fn new(context: Arc<CardinalContext>) -> Self {
+        Self { context }
+    }
+}
+
+impl CardinalContextProvider for StaticContextProvider {
+    fn resolve(&self, _session: &Session) -> Option<Arc<CardinalContext>> {
+        Some(self.context.clone())
+    }
+}
+
+pub struct CardinalProxy {
+    provider: Arc<dyn CardinalContextProvider>,
 }
 
 impl CardinalProxy {
     pub fn new(context: Arc<CardinalContext>) -> Self {
         Self::builder(context).build()
+    }
+
+    pub fn with_provider(provider: Arc<dyn CardinalContextProvider>) -> Self {
+        Self { provider }
     }
 
     pub fn builder(context: Arc<CardinalContext>) -> CardinalProxyBuilder {
@@ -29,33 +53,33 @@ impl CardinalProxy {
 }
 
 pub struct CardinalProxyBuilder {
-    context: Arc<CardinalContext>,
-    filters: PluginRunner,
+    provider: Arc<dyn CardinalContextProvider>,
 }
 
 impl CardinalProxyBuilder {
     pub fn new(context: Arc<CardinalContext>) -> Self {
         Self {
-            context: context.clone(),
-            filters: PluginRunner::new(context),
+            provider: Arc::new(StaticContextProvider::new(context)),
         }
     }
 
-    pub fn filters(&self) -> &PluginRunner {
-        &self.filters
+    pub fn from_context_provider(provider: Arc<dyn CardinalContextProvider>) -> Self {
+        Self { provider }
+    }
+
+    pub fn with_context_provider(mut self, provider: Arc<dyn CardinalContextProvider>) -> Self {
+        self.provider = provider;
+        self
     }
 
     pub fn build(self) -> CardinalProxy {
-        CardinalProxy {
-            context: self.context,
-            filters: Arc::new(self.filters),
-        }
+        CardinalProxy::with_provider(self.provider)
     }
 }
 
 #[async_trait::async_trait]
 impl ProxyHttp for CardinalProxy {
-    type CTX = Option<Arc<DestinationWrapper>>;
+    type CTX = Option<RequestContext>;
 
     fn new_ctx(&self) -> Self::CTX {
         None
@@ -64,15 +88,22 @@ impl ProxyHttp for CardinalProxy {
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
         let path = session.req_header().uri.path().to_string();
         info!(%path, "Request received");
-        let destination_container = self
-            .context
+
+        let context = match self.provider.resolve(session) {
+            Some(ctx) => ctx,
+            None => {
+                warn!(%path, "No context found for request host");
+                let _ = session.respond_error(421).await;
+                return Ok(true);
+            }
+        };
+
+        let destination_container = context
             .get::<DestinationContainer>()
             .await
             .map_err(|_| Error::new_str("Destination Container is not present"))?;
 
-        let force_path = self.context.config.server.force_path_parameter;
-
-        // Resolve backend or 404
+        let force_path = context.config.server.force_path_parameter;
         let backend =
             match destination_container.get_backend_for_request(session.req_header(), force_path) {
                 Some(b) => b.clone(),
@@ -84,33 +115,34 @@ impl ProxyHttp for CardinalProxy {
             };
 
         let destination_name = backend.destination.name.clone();
-
-        // Prepare upstream Host/SNI headers
         let _ = set_upstream_host_headers(session, &backend);
         info!(backend_id = %destination_name, "Routing to backend");
 
-        // Set backend context and rewrite path
-        *ctx = Some(backend.clone());
         rewrite_request_path(session.req_header_mut(), &destination_name, force_path);
 
-        let run_filters = self.filters.run_request_filters(session, backend).await;
+        let mut request_state = RequestContext::new(context.clone());
+        request_state.backend = Some(backend.clone());
+
+        let run_filters = request_state
+            .runner
+            .run_request_filters(session, backend)
+            .await;
 
         let res = match run_filters {
             Ok(filter_result) => filter_result,
             Err(err) => {
                 error!(%err, "Error running request filters");
-                println!("{:?}", err);
                 let _ = session.respond_error(500).await;
                 return Ok(true);
             }
         };
 
-        match res {
-            MiddlewareResult::Continue => {}
-            MiddlewareResult::Responded => return Ok(true),
-        }
+        *ctx = Some(request_state);
 
-        Ok(false)
+        match res {
+            MiddlewareResult::Continue => Ok(false),
+            MiddlewareResult::Responded => Ok(true),
+        }
     }
 
     async fn upstream_peer(
@@ -118,31 +150,35 @@ impl ProxyHttp for CardinalProxy {
         _session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        if let Some(backend) = ctx {
-            // Determine origin parts for TLS and SNI
-            let (host, port, is_tls) = parse_origin(&backend.destination.url)
-                .map_err(|_| Error::new_str("Origin could not be parsed "))?;
-            let hostport = format!("{}:{}", host, port);
+        if let Some(state) = ctx.as_ref() {
+            if let Some(backend) = state.backend.as_ref() {
+                // Determine origin parts for TLS and SNI
+                let (host, port, is_tls) = parse_origin(&backend.destination.url)
+                    .map_err(|_| Error::new_str("Origin could not be parsed "))?;
+                let hostport = format!("{}:{}", host, port);
 
-            // Compose full upstream URL for logging with normalized scheme
-            let path_and_query = _session
-                .req_header()
-                .uri
-                .path_and_query()
-                .map(|pq| pq.as_str())
-                .unwrap_or("/");
-            let upstream_url = compose_upstream_url(is_tls, &host, port, path_and_query);
+                // Compose full upstream URL for logging with normalized scheme
+                let path_and_query = _session
+                    .req_header()
+                    .uri
+                    .path_and_query()
+                    .map(|pq| pq.as_str())
+                    .unwrap_or("/");
+                let upstream_url = compose_upstream_url(is_tls, &host, port, path_and_query);
 
-            info!(%upstream_url, backend_id = %backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
-            debug!(upstream_origin = %hostport, "Connecting to upstream origin");
+                info!(%upstream_url, backend_id = %backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
+                debug!(upstream_origin = %hostport, "Connecting to upstream origin");
 
-            let mut peer = HttpPeer::new(&hostport, is_tls, host);
-            if let Some(opts) = peer.get_mut_peer_options() {
-                // Allow both HTTP/1.1 and HTTP/2 so plain HTTP backends keep working.
-                opts.set_http_version(2, 1);
+                let mut peer = HttpPeer::new(&hostport, is_tls, host);
+                if let Some(opts) = peer.get_mut_peer_options() {
+                    // Allow both HTTP/1.1 and HTTP/2 so plain HTTP backends keep working.
+                    opts.set_http_version(2, 1);
+                }
+                let peer = Box::new(peer);
+                Ok(peer)
+            } else {
+                Err(Error::new(ErrorType::InternalError))
             }
-            let peer = Box::new(peer);
-            Ok(peer)
         } else {
             Err(Error::new(ErrorType::InternalError))
         }
@@ -160,6 +196,7 @@ impl ProxyHttp for CardinalProxy {
     ) -> Result<()> {
         let backend_id = ctx
             .as_ref()
+            .and_then(|state| state.backend.as_ref())
             .map(|b| b.destination.name.as_str())
             .unwrap_or("<unknown>");
         info!(backend_id, reused, peer = %peer, "Connected to upstream");
@@ -172,32 +209,53 @@ impl ProxyHttp for CardinalProxy {
         upstream_response: &mut ResponseHeader,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
-        if let Some(backend) = ctx.as_ref() {
-            self.filters
-                .run_response_filters(session, backend.clone(), upstream_response)
-                .await;
-        }
+        if let Some(state) = ctx.as_mut() {
+            if let Some(backend) = state.backend.clone() {
+                state
+                    .runner
+                    .run_response_filters(session, backend, upstream_response)
+                    .await;
+            }
 
-        if !self.context.config.server.log_upstream_response {
-            return Ok(());
-        }
+            if !state.context.config.server.log_upstream_response {
+                return Ok(());
+            }
 
-        let status = upstream_response.status.as_u16();
-        let location = upstream_response
-            .headers
-            .get("location")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-        let backend_id = ctx
-            .as_ref()
-            .map(|b| b.destination.name.as_str())
-            .unwrap_or("<unknown>");
-        if let Some(loc) = location {
-            info!(backend_id, status, location = %loc, "Upstream responded");
-        } else {
-            info!(backend_id, status, "Upstream responded");
+            let status = upstream_response.status.as_u16();
+            let location = upstream_response
+                .headers
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+            let backend_id = state
+                .backend
+                .as_ref()
+                .map(|b| b.destination.name.as_str())
+                .unwrap_or("<unknown>");
+            if let Some(loc) = location {
+                info!(backend_id, status, location = %loc, "Upstream responded");
+            } else {
+                info!(backend_id, status, "Upstream responded");
+            }
         }
 
         Ok(())
+    }
+}
+
+pub struct RequestContext {
+    pub context: Arc<CardinalContext>,
+    pub backend: Option<Arc<DestinationWrapper>>,
+    pub runner: PluginRunner,
+}
+
+impl RequestContext {
+    fn new(context: Arc<CardinalContext>) -> Self {
+        let runner = PluginRunner::new(context.clone());
+        Self {
+            context,
+            backend: None,
+            runner,
+        }
     }
 }

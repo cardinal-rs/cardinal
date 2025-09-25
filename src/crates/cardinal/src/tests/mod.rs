@@ -11,6 +11,7 @@ mod tests {
     use cardinal_config::{load_config, CardinalConfig};
     use cardinal_errors::CardinalError;
     use cardinal_plugins::container::{PluginBuiltInType, PluginContainer, PluginHandler};
+    use cardinal_plugins::headers::CARDINAL_PARAMS_HEADER_BASE;
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
     use cardinal_plugins::utils::parse_query_string_multi;
     use cardinal_wasm_plugins::plugin::WasmPlugin;
@@ -320,6 +321,72 @@ mod tests {
 
         assert_eq!(middleware_hits.load(Ordering::SeqCst), 1);
         assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn restricted_route_middleware_enforces_routes_and_injects_params() {
+        let handle = runtime_handle().await;
+
+        let config = load_test_config("restricted_route_middleware.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = config
+            .destinations
+            .get("posts")
+            .expect("missing posts destination")
+            .url
+            .clone();
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let header_value: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let backend_hits_clone = backend_hits.clone();
+        let header_value_clone = header_value.clone();
+
+        let _backend_server = create_server_with(
+            backend_addr.clone(),
+            handle.clone(),
+            vec![Route::new(Method::Get, "/123/detail", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let expected_header = format!("{}id", CARDINAL_PARAMS_HEADER_BASE);
+                let header = request.headers().iter().find_map(|h| {
+                    let field = h.field.as_str().as_str();
+                    if field.eq_ignore_ascii_case(expected_header.as_str()) {
+                        Some(h.value.to_string())
+                    } else {
+                        None
+                    }
+                });
+                *header_value_clone.lock().unwrap() = header;
+
+                let response = Response::from_string("restricted-ok");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let mut allowed = ureq::get(&format!("http://{}/posts/123/detail", server_addr))
+            .call()
+            .unwrap();
+        assert_eq!(allowed.status(), 200);
+        let body = allowed.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "restricted-ok");
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(header_value.lock().unwrap().as_deref(), Some("123"));
+
+        let err = ureq::get(&format!("http://{}/posts/123", server_addr))
+            .call()
+            .expect_err("expected restricted route middleware to block request");
+
+        match err {
+            UreqError::StatusCode(code) => {
+                assert_eq!(code, 402);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

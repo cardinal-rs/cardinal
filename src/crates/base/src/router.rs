@@ -22,7 +22,7 @@ impl CardinalRouter {
 
     pub fn add(&mut self, method: &str, path: &str) -> Result<(), CardinalError> {
         self.router
-            .insert(format!("{}:{}", method, path), ())
+            .insert(format!("{}:{}", method.to_lowercase(), path), ())
             .map_err(|e| CardinalInternalError::InvalidRouteConfiguration(e.to_string()))?;
         Ok(())
     }

@@ -1,0 +1,37 @@
+name: CI
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+defaults:
+  run:
+    shell: bash
+jobs:
+
+  just:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fmt-check, clippy, cargo-test]
+    runs-on: 'ubuntu-latest'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: 'ci-cache'
+
+      - name: Set up just runner
+        uses: extractions/setup-just@v2
+
+      - name: Install tools
+        run: just install-tools
+
+      - name: Run +${{ matrix.target }}
+        run: just ${{ matrix.target }}
+

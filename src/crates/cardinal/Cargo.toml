@@ -6,9 +6,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "CLI interface for the Cardinal project"
-keywords = ["cardinal", "cli", "command-line"]
-categories = ["command-line-utilities"]
+description = "Runtime orchestrator for the Cardinal reverse proxy"
+keywords = ["gateway", "reverse-proxy", "pingora"]
+categories = ["network-programming", "web-programming::http-server"]
 
 [dependencies]
 cardinal-base = { path = "../base" }

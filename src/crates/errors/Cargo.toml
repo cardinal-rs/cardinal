@@ -6,12 +6,11 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Error types and helpers for the Cardinal project"
-keywords = ["cardinal", "errors", "error-handling"]
+description = "Shared error types for the Cardinal gateway stack"
+keywords = ["error-handling", "gateway", "pingora"]
 categories = ["development-tools"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 config.workspace = true
-

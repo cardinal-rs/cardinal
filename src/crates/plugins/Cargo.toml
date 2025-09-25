@@ -6,9 +6,9 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Error types and helpers for the Cardinal project"
-keywords = ["cardinal", "errors", "error-handling"]
-categories = ["development-tools"]
+description = "Middleware registry and execution engine for the Cardinal gateway"
+keywords = ["middleware", "gateway", "wasm", "reverse-proxy"]
+categories = ["network-programming", "development-tools"]
 
 [dependencies]
 pingora = { workspace = true, features = ["openssl"] }

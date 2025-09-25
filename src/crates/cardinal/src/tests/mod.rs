@@ -390,6 +390,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restricted_route_middleware_blocks_unconfigured_route() {
+        let handle = runtime_handle().await;
+
+        let config = load_test_config("restricted_route_middleware_negative.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = config
+            .destinations
+            .get("posts")
+            .expect("missing posts destination")
+            .url
+            .clone();
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+
+        let _backend_server = create_server_with(
+            backend_addr.clone(),
+            handle.clone(),
+            vec![Route::new(Method::Get, "/123", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("should-not-hit");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let err = ureq::get(&format!("http://{}/posts/123", server_addr))
+            .call()
+            .expect_err("expected restricted route middleware to block request");
+
+        match err {
+            UreqError::StatusCode(code) => assert_eq!(code, 402),
+            _ => panic!("unexpected error variant"),
+        }
+
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn wasm_response_plugin_injects_headers() {
         let handle = runtime_handle().await;
 

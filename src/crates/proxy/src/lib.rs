@@ -99,6 +99,7 @@ impl ProxyHttp for CardinalProxy {
             Ok(filter_result) => filter_result,
             Err(err) => {
                 error!(%err, "Error running request filters");
+                println!("{:?}", err);
                 let _ = session.respond_error(500).await;
                 return Ok(true);
             }

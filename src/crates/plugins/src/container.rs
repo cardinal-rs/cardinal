@@ -7,12 +7,14 @@ use cardinal_base::provider::Provider;
 use cardinal_config::{Middleware, MiddlewareType, Plugin};
 use cardinal_errors::CardinalError;
 use cardinal_wasm_plugins::plugin::WasmPlugin;
-use cardinal_wasm_plugins::runner::{ExecutionType, WasmRunner};
+use cardinal_wasm_plugins::runner::{ExecutionResult, ExecutionType, WasmRunner};
 use cardinal_wasm_plugins::{ExecutionContext, ExecutionRequest, ExecutionResponse};
+use http::{HeaderName, HeaderValue, StatusCode};
 use pingora::prelude::Session;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, warn};
 
 pub enum PluginBuiltInType {
     Inbound(Arc<DynRequestMiddleware>),
@@ -105,10 +107,11 @@ impl PluginContainer {
 
                     if exec.should_continue {
                         return Ok(MiddlewareResult::Continue);
+                    } else {
+                        let _ = session.respond_error(403).await;
+                        return Ok(MiddlewareResult::Responded);
                     }
                 }
-
-                Ok(MiddlewareResult::Continue)
             }
         }
     }
@@ -160,12 +163,19 @@ impl PluginContainer {
 
                         let exec = runner.run(ExecutionContext::Outbound(outbound_ctx));
 
-                        if let Ok(exec) = exec {
-                            if exec.should_continue {
-                                return;
+                        match &exec {
+                            Ok(ex) => {
+                                let outbound_resp = ex.execution_context.as_outbound().unwrap();
+                                for (key, val) in &outbound_resp.resp_headers {
+                                    let _ =
+                                        response.insert_header(key.to_string(), val.to_string());
+                                }
+
+                                response.set_status(outbound_resp.status as u16).unwrap();
                             }
-                        } else if let Err(e) = exec {
-                            error!("Failed to run plugin {}: {}", name, e);
+                            Err(e) => {
+                                error!("Failed to run plugin {}: {}", name, e);
+                            }
                         }
                     }
                 }
@@ -185,10 +195,8 @@ impl Provider for PluginContainer {
             let plugin_exists = plugin_container.plugins.contains_key(plugin_name);
 
             if plugin_exists {
-                return Err(CardinalError::Other(format!(
-                    "Plugin {} already exists. Please choose a different name",
-                    plugin_name
-                )));
+                warn!("Plugin {} already exists, skipping", plugin_name);
+                continue;
             }
 
             match plugin {

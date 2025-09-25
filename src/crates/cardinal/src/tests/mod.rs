@@ -501,6 +501,177 @@ mod tests {
         assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
     }
 
+    #[tokio::test]
+    async fn wasm_inbound_plugin_allows_request_when_trigger_present() {
+        let handle = runtime_handle().await;
+        let config = load_test_config("wasm_inbound_header_set.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let recorded_header: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let hits_clone = backend_hits.clone();
+        let header_clone = recorded_header.clone();
+
+        let _backend_server = spawn_backend(
+            &handle,
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                hits_clone.fetch_add(1, Ordering::SeqCst);
+                let header = request.headers().iter().find_map(|h| {
+                    if h.field.equiv("x-allow") {
+                        Some(h.value.as_str().to_string())
+                    } else {
+                        None
+                    }
+                });
+                *header_clone.lock().unwrap() = header.clone();
+
+                let response = Response::from_string("inbound-ok");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .header("x-allow", "true")
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "inbound-ok");
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(recorded_header.lock().unwrap().as_deref(), Some("true"));
+    }
+
+    #[tokio::test]
+    async fn wasm_inbound_plugin_blocks_request_without_trigger() {
+        let handle = runtime_handle().await;
+        let config = load_test_config("wasm_inbound_header_skip.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let recorded_header: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let hits_clone = backend_hits.clone();
+        let header_clone = recorded_header.clone();
+
+        let _backend_server = spawn_backend(
+            &handle,
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                hits_clone.fetch_add(1, Ordering::SeqCst);
+                let header = request.headers().iter().find_map(|h| {
+                    if h.field.equiv("x-allow") {
+                        Some(h.value.as_str().to_string())
+                    } else {
+                        None
+                    }
+                });
+                *header_clone.lock().unwrap() = header.clone();
+
+                let response = Response::from_string("unexpected");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let err = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .expect_err("expected backend rejection when plugin not triggered");
+
+        expect_status(err, 403);
+
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
+        assert!(recorded_header.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn wasm_outbound_plugin_adds_response_headers_for_client() {
+        let handle = runtime_handle().await;
+        let config = load_test_config("wasm_outbound_header_set.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let hits_clone = backend_hits.clone();
+
+        let _backend_server = spawn_backend(
+            &handle,
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("outbound-ok");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .header("x-set-response", "true")
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 201);
+        let headers = response.headers();
+        let tag = headers
+            .get("x-wasm-response")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_owned());
+        assert_eq!(tag.as_deref(), Some("enabled"));
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "outbound-ok");
+    }
+
+    #[tokio::test]
+    async fn wasm_outbound_plugin_skips_headers_when_not_triggered() {
+        let handle = runtime_handle().await;
+        let config = load_test_config("wasm_outbound_header_skip.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let hits_clone = backend_hits.clone();
+
+        let _backend_server = spawn_backend(
+            &handle,
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("outbound-skip");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let headers = response.headers();
+        assert!(headers.get("x-wasm-response").is_none());
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "outbound-skip");
+    }
+
     fn spawn_cardinal(cardinal: Cardinal) -> JoinHandle<()> {
         std::thread::spawn(move || {
             cardinal.run().unwrap();

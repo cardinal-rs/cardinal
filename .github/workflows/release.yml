@@ -10,7 +10,6 @@ jobs:
     if: github.event.release.draft == false && github.event.release.prerelease == false
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      RUSTFLAGS: "-C link-self-contained=no"
     steps:
       - name: Check out repository
         uses: actions/checkout@v5

@@ -22,6 +22,15 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libssl-dev zlib1g-dev \
+            clang libclang-dev \
+            libunwind-dev
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: 'ci-cache'
@@ -34,4 +43,3 @@ jobs:
 
       - name: Run +${{ matrix.target }}
         run: just ${{ matrix.target }}
-

@@ -17,6 +17,5 @@ ubuntu-essentials:
     sudo apt-get install -y \
       build-essential pkg-config \
       libssl-dev zlib1g-dev \
-      clang libclang-dev
-    cargo build --verbose
-    cargo test --verbose
+      clang libclang-dev \
+      libunwind-dev

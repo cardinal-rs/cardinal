@@ -19,4 +19,5 @@ ubuntu-essentials:
       libssl-dev zlib1g-dev \
       clang libclang-dev \
       libunwind-dev \
-      llvm
+      llvm \
+      lld

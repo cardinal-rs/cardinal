@@ -22,4 +22,6 @@ ubuntu-essentials:
       llvm \
       lld \
       binutils \
-      libgcc-12-dev
+      libgcc-12-dev \
+      libstdc++-12-dev \
+      libtinfo5

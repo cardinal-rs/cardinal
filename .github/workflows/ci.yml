@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         target: [fmt-check, clippy, cargo-test]
-    runs-on: 'ubuntu-latest'
+    runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-C link-self-contained=no"
     steps:
@@ -38,4 +38,11 @@ jobs:
         run: just install-tools
 
       - name: Run +${{ matrix.target }}
-        run: just ${{ matrix.target }}
+        run: |
+          if [[ "${{ matrix.target }}" == "cargo-test" ]]; then
+            rustup toolchain install 1.88.0 --profile minimal --no-self-update
+            rustup default 1.88.0
+            rustc --version
+            cargo --version
+          fi
+          just ${{ matrix.target }}

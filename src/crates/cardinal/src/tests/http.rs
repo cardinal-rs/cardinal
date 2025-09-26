@@ -2,9 +2,8 @@
 pub mod http {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::thread::{self, JoinHandle};
     use tiny_http::{Header, Method, Response, Server, StatusCode};
-    use tokio::runtime::Handle;
-    use tokio::task::JoinHandle;
 
     type RouteKey = (Method, String);
     type RouteHandler = Arc<dyn Fn(tiny_http::Request) + Send + Sync + 'static>;
@@ -18,15 +17,11 @@ pub mod http {
 
     impl TestHttpServer {
         /// Starts the testing server on a random local port with the provided routes.
-        pub fn spawn_with_routes(
-            server: String,
-            handle: Handle,
-            routes: impl IntoIterator<Item = Route>,
-        ) -> Self {
+        pub fn spawn_with_routes(server: String, routes: impl IntoIterator<Item = Route>) -> Self {
             let route_map = Arc::new(build_route_map(routes));
             let server = Arc::new(Server::http(server).expect("failed to start test server"));
             let address = server.server_addr().to_string();
-            let worker = spawn_worker(handle, server.clone(), route_map);
+            let worker = spawn_worker(server.clone(), route_map);
 
             Self {
                 address,
@@ -43,17 +38,18 @@ pub mod http {
     /// Starts a server with custom routes.
     pub fn create_server_with(
         server: String,
-        handle: Handle,
         routes: impl IntoIterator<Item = Route>,
     ) -> TestHttpServer {
-        TestHttpServer::spawn_with_routes(server, handle, routes)
+        TestHttpServer::spawn_with_routes(server, routes)
     }
 
     impl Drop for TestHttpServer {
         fn drop(&mut self) {
             self.server.unblock();
 
-            let _ = self.worker.take();
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
         }
     }
 
@@ -90,11 +86,10 @@ pub mod http {
     }
 
     fn spawn_worker(
-        handle: Handle,
         server: Arc<Server>,
         routes: Arc<HashMap<RouteKey, RouteHandler>>,
     ) -> JoinHandle<()> {
-        handle.spawn(async move {
+        thread::spawn(move || {
             for request in server.incoming_requests() {
                 let method = request.method().clone();
                 let url = request.url().to_string();

@@ -26,11 +26,9 @@ mod tests {
     use std::thread::JoinHandle;
     use std::time::Duration;
     use tiny_http::{Method, Response};
-    use tokio::runtime::{Handle, Runtime};
     use tokio::sync::OnceCell;
     use ureq::Error as UreqError;
 
-    static GLOBAL_RT: OnceCell<Runtime> = OnceCell::const_new();
     static SERVER: OnceLock<Mutex<std::thread::JoinHandle<()>>> = OnceLock::new();
 
     static TEST_HTTP_SERVER: OnceCell<Servers> = OnceCell::const_new();
@@ -38,19 +36,6 @@ mod tests {
     struct Servers {
         posts_api: TestHttpServer,
         auth_api: TestHttpServer,
-    }
-
-    async fn runtime_handle() -> Handle {
-        GLOBAL_RT
-            .get_or_try_init(|| async {
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-            })
-            .await
-            .expect("failed to initialize test runtime")
-            .handle()
-            .clone()
     }
 
     pub fn run_cardinal() -> &'static Mutex<std::thread::JoinHandle<()>> {
@@ -84,12 +69,8 @@ mod tests {
             .clone()
     }
 
-    fn spawn_backend(
-        handle: &Handle,
-        address: impl Into<String>,
-        routes: Vec<Route>,
-    ) -> TestHttpServer {
-        create_server_with(address.into(), handle.clone(), routes)
+    fn spawn_backend(address: impl Into<String>, routes: Vec<Route>) -> TestHttpServer {
+        create_server_with(address.into(), routes)
     }
 
     fn cardinal_with_plugin_factory<F>(config: CardinalConfig, init: F) -> Cardinal
@@ -129,10 +110,8 @@ mod tests {
     }
 
     async fn create_posts_api() -> Result<TestHttpServer, ()> {
-        let handle = runtime_handle().await;
         Ok(create_server_with(
             "127.0.0.1:9995".to_string(),
-            handle.clone(),
             vec![
                 Route::new(Method::Post, "/post", move |request| {
                     let response = Response::from_string("Hello World");
@@ -147,10 +126,8 @@ mod tests {
     }
 
     async fn create_auth_api() -> Result<TestHttpServer, ()> {
-        let handle = runtime_handle().await;
         Ok(create_server_with(
             "127.0.0.1:9992".to_string(),
-            handle.clone(),
             vec![Route::new(Method::Post, "/current", move |request| {
                 let response = Response::from_string("Hello World");
                 let _ = request.respond(response).unwrap();
@@ -194,7 +171,6 @@ mod tests {
 
     #[tokio::test]
     async fn global_request_middleware_executes_before_backend() {
-        let handle = runtime_handle().await;
         let config = load_test_config("global_request_middleware.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
@@ -202,7 +178,6 @@ mod tests {
         let request_hits = Arc::new(AtomicUsize::new(0));
         let backend_hits_clone = backend_hits.clone();
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -241,14 +216,12 @@ mod tests {
 
     #[tokio::test]
     async fn global_response_middleware_decorates_response() {
-        let handle = runtime_handle().await;
         let config = load_test_config("global_response_middleware.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
         let backend_hits = Arc::new(AtomicUsize::new(0));
         let backend_hits_clone = backend_hits.clone();
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -295,8 +268,6 @@ mod tests {
 
     #[tokio::test]
     async fn destination_request_middleware_can_short_circuit() {
-        let handle = runtime_handle().await;
-
         let backend_hits = Arc::new(AtomicUsize::new(0));
         let middleware_hits = Arc::new(AtomicUsize::new(0));
 
@@ -305,7 +276,6 @@ mod tests {
         let backend_addr = destination_url(&config, "posts");
         let backend_hits_clone = backend_hits.clone();
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -343,8 +313,6 @@ mod tests {
 
     #[tokio::test]
     async fn restricted_route_middleware_enforces_routes_and_injects_params() {
-        let handle = runtime_handle().await;
-
         let config = load_test_config("restricted_route_middleware.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = config
@@ -360,7 +328,6 @@ mod tests {
         let header_value_clone = header_value.clone();
 
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/123/detail", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -404,8 +371,6 @@ mod tests {
 
     #[tokio::test]
     async fn restricted_route_middleware_blocks_unconfigured_route() {
-        let handle = runtime_handle().await;
-
         let config = load_test_config("restricted_route_middleware_negative.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = config
@@ -419,7 +384,6 @@ mod tests {
         let backend_hits_clone = backend_hits.clone();
 
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/123", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -443,8 +407,6 @@ mod tests {
 
     #[tokio::test]
     async fn wasm_response_plugin_injects_headers() {
-        let handle = runtime_handle().await;
-
         let config = load_test_config("wasm_response_plugin.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
@@ -452,7 +414,6 @@ mod tests {
         let backend_hits = Arc::new(AtomicUsize::new(0));
         let backend_hits_clone = backend_hits.clone();
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -504,7 +465,6 @@ mod tests {
 
     #[tokio::test]
     async fn wasm_inbound_plugin_allows_request_when_trigger_present() {
-        let handle = runtime_handle().await;
         let config = load_test_config("wasm_inbound_header_set.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
@@ -513,7 +473,6 @@ mod tests {
         let hits_clone = backend_hits.clone();
 
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -551,7 +510,6 @@ mod tests {
 
     #[tokio::test]
     async fn wasm_inbound_plugin_blocks_request_without_trigger() {
-        let handle = runtime_handle().await;
         let config = load_test_config("wasm_inbound_header_skip.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
@@ -560,7 +518,6 @@ mod tests {
         let hits_clone = backend_hits.clone();
 
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -584,7 +541,6 @@ mod tests {
 
     #[tokio::test]
     async fn wasm_outbound_plugin_adds_response_headers_for_client() {
-        let handle = runtime_handle().await;
         let config = load_test_config("wasm_outbound_header_set.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
@@ -593,7 +549,6 @@ mod tests {
         let hits_clone = backend_hits.clone();
 
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -626,7 +581,6 @@ mod tests {
 
     #[tokio::test]
     async fn wasm_outbound_plugin_skips_headers_when_not_triggered() {
-        let handle = runtime_handle().await;
         let config = load_test_config("wasm_outbound_header_skip.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
@@ -635,7 +589,6 @@ mod tests {
         let hits_clone = backend_hits.clone();
 
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -663,7 +616,6 @@ mod tests {
 
     #[tokio::test]
     async fn context_provider_resolve_allows_request() {
-        let handle = runtime_handle().await;
         let config = load_test_config("context_provider_missing.toml");
         let builder = Cardinal::builder(config);
         let context = builder.context();
@@ -686,7 +638,6 @@ mod tests {
         let backend_hits = Arc::new(AtomicUsize::new(0));
         let backend_hits_clone = backend_hits.clone();
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);
@@ -720,7 +671,6 @@ mod tests {
 
     #[tokio::test]
     async fn context_provider_missing_returns_421() {
-        let handle = runtime_handle().await;
         let config = load_test_config("context_provider.toml");
         let builder = Cardinal::builder(config);
         let context = builder.context();
@@ -741,7 +691,6 @@ mod tests {
         let backend_hits = Arc::new(AtomicUsize::new(0));
         let backend_hits_clone = backend_hits.clone();
         let _backend_server = spawn_backend(
-            &handle,
             backend_addr.clone(),
             vec![Route::new(Method::Get, "/post", move |request| {
                 backend_hits_clone.fetch_add(1, Ordering::SeqCst);

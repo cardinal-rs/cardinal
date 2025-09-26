@@ -20,4 +20,6 @@ ubuntu-essentials:
       clang libclang-dev \
       libunwind-dev \
       llvm \
-      lld
+      lld \
+      binutils \
+      libgcc-12-dev

@@ -16,6 +16,6 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.37", features = ["derive"] }
-cardinal = { path = "../cardinal", version = "0.1.0" }
-cardinal-errors = { path = "../errors", version = "0.1.0" }
+cardinal-rs = { path = "../cardinal", version = "0.2.0" }
+cardinal-errors = { path = "../errors", version = "0.2.0" }
 tracing-subscriber = { workspace = true, features = ["env-filter"]}

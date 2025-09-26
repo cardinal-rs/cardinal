@@ -361,8 +361,79 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
-name = "cardinal"
-version = "0.1.0"
+name = "cardinal-base"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "cardinal-config",
+ "cardinal-errors",
+ "http",
+ "matchit",
+ "parking_lot",
+ "pingora",
+ "tokio",
+]
+
+[[package]]
+name = "cardinal-cli"
+version = "0.2.0"
+dependencies = [
+ "cardinal-errors",
+ "cardinal-rs",
+ "clap 4.5.48",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "cardinal-config"
+version = "0.2.0"
+dependencies = [
+ "config",
+ "derive_builder",
+ "serde",
+ "walkdir",
+]
+
+[[package]]
+name = "cardinal-errors"
+version = "0.2.0"
+dependencies = [
+ "config",
+ "serde",
+ "thiserror 2.0.16",
+]
+
+[[package]]
+name = "cardinal-plugins"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "cardinal-base",
+ "cardinal-config",
+ "cardinal-errors",
+ "cardinal-wasm-plugins",
+ "form_urlencoded",
+ "http",
+ "pingora",
+ "tracing",
+]
+
+[[package]]
+name = "cardinal-proxy"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "cardinal-base",
+ "cardinal-errors",
+ "cardinal-plugins",
+ "http",
+ "pingora",
+ "tracing",
+]
+
+[[package]]
+name = "cardinal-rs"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cardinal-base",
@@ -379,79 +450,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "cardinal-base"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cardinal-config",
- "cardinal-errors",
- "http",
- "matchit",
- "parking_lot",
- "pingora",
- "tokio",
-]
-
-[[package]]
-name = "cardinal-cli"
-version = "0.1.0"
-dependencies = [
- "cardinal",
- "cardinal-errors",
- "clap 4.5.48",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "cardinal-config"
-version = "0.1.0"
-dependencies = [
- "config",
- "derive_builder",
- "serde",
- "walkdir",
-]
-
-[[package]]
-name = "cardinal-errors"
-version = "0.1.0"
-dependencies = [
- "config",
- "serde",
- "thiserror 2.0.16",
-]
-
-[[package]]
-name = "cardinal-plugins"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cardinal-base",
- "cardinal-config",
- "cardinal-errors",
- "cardinal-wasm-plugins",
- "form_urlencoded",
- "http",
- "pingora",
- "tracing",
-]
-
-[[package]]
-name = "cardinal-proxy"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cardinal-base",
- "cardinal-errors",
- "cardinal-plugins",
- "http",
- "pingora",
- "tracing",
-]
-
-[[package]]
 name = "cardinal-wasm-plugins"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "cardinal-errors",

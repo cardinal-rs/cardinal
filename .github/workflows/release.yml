@@ -48,7 +48,18 @@ jobs:
             cardinal-cli
           )
           for crate in "${crates[@]}"; do
-            cargo publish --package "$crate" --locked
-            # allow the crates.io index to catch up before the next publish
-            sleep 20
+            if publish_output=$(cargo publish --package "$crate" --locked 2>&1); then
+              printf '%s\n' "$publish_output"
+              # allow the crates.io index to catch up before the next publish
+              sleep 20
+              continue
+            fi
+
+            printf '%s\n' "$publish_output"
+            if printf '%s\n' "$publish_output" | grep -q "already exists"; then
+              echo "crate $crate already published, skipping"
+              continue
+            fi
+
+            exit 1
           done

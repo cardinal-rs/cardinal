@@ -1,0 +1,9 @@
+{
+  "req_headers": {
+    "x-allow": "true"
+  },
+  "query": {
+    "allow": "false"
+  },
+  "body": null
+}

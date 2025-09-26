@@ -1,0 +1,8 @@
+{
+  "execution_type": "outbound",
+  "should_continue": false,
+  "status": 422,
+  "resp_headers": {
+    "x-error": "missing tenant"
+  }
+}

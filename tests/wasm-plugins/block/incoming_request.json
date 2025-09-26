@@ -1,0 +1,9 @@
+{
+  "req_headers": {
+    "x-block": "true"
+  },
+  "query": {},
+  "resp_headers": {},
+  "status": 0,
+  "body": null
+}

@@ -1,0 +1,15 @@
+[server]
+address = "127.0.0.1:1818"
+force_path_parameter = true
+log_upstream_response = false
+global_request_middleware = []
+global_response_middleware = ["outbound-tag"]
+
+[destinations.posts]
+name = "posts"
+url = "127.0.0.1:2918"
+routes = []
+middleware = []
+
+[[plugins]]
+wasm = { name = "outbound-tag", path = "../../../tests/wasm-plugins/outbound-tag/plugin.wasm" }

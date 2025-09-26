@@ -1,0 +1,20 @@
+[package]
+name = "cardinal-proxy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Pingora-based HTTP proxy implementation for the Cardinal gateway"
+keywords = ["reverse-proxy", "gateway", "pingora", "http"]
+categories = ["network-programming", "web-programming::http-server"]
+
+[dependencies]
+pingora = { workspace = true, features = ["openssl"] }
+cardinal-base = { path = "../base", version = "0.1.0" }
+tracing.workspace = true
+http.workspace = true
+cardinal-errors = { path = "../errors", version = "0.1.0" }
+cardinal-plugins = { path = "../plugins", version = "0.1.0" }
+async-trait.workspace = true

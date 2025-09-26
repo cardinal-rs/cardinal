@@ -1,0 +1,17 @@
+[package]
+name = "cardinal-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Configuration loader and validator for the Cardinal gateway"
+keywords = ["configuration", "gateway", "toml"]
+categories = ["config", "development-tools"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+derive_builder.workspace = true
+config.workspace = true
+walkdir = "2.5.0"

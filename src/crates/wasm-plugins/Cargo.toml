@@ -1,0 +1,20 @@
+[package]
+name = "cardinal-wasm-plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Host runtime for Cardinal's WebAssembly middleware"
+keywords = ["wasm", "middleware", "gateway", "runtime"]
+categories = ["wasm", "network-programming"]
+
+[dependencies]
+wasmer = { version = "6.0.1-rc.5", features = ["default"] }
+cardinal-errors = { path = "../errors", version = "0.1.0" }
+derive_builder.workspace = true
+bytes = "1.10.1"
+serde_json = "1.0"
+enum-as-inner = "0.6.1"
+tracing.workspace = true

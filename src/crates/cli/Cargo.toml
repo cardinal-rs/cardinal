@@ -1,0 +1,21 @@
+[package]
+name = "cardinal-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Command-line launcher for the Cardinal gateway"
+keywords = ["gateway", "reverse-proxy", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "cardinal"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.37", features = ["derive"] }
+cardinal = { path = "../cardinal", version = "0.1.0" }
+cardinal-errors = { path = "../errors", version = "0.1.0" }
+tracing-subscriber = { workspace = true, features = ["env-filter"]}

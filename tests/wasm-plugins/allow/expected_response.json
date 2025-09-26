@@ -1,0 +1,10 @@
+{
+  "execution_type": "outbound",
+  "should_continue": true,
+  "status": 200,
+  "resp_headers": {
+    "x-decision": "allow",
+    "x-auth": "Bearer 12345",
+    "x-tenant": "alpha"
+  }
+}

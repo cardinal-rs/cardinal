@@ -10,6 +10,7 @@ jobs:
     if: github.event.release.draft == false && github.event.release.prerelease == false
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      RUSTFLAGS: "-C link-self-contained=no"
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -19,7 +20,13 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up just runner
+        uses: extractions/setup-just@v2
+
       - name: Install system dependencies
+        run: just ubuntu-essentials
+
+      - name: Ensure crate versions are unpublished
         run: |
           sudo apt-get update
           sudo apt-get install -y \

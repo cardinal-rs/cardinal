@@ -18,4 +18,5 @@ ubuntu-essentials:
       build-essential pkg-config \
       libssl-dev zlib1g-dev \
       clang libclang-dev \
-      libunwind-dev
+      libunwind-dev \
+      llvm

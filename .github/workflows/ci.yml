@@ -14,6 +14,8 @@ jobs:
       matrix:
         target: [fmt-check, clippy, cargo-test]
     runs-on: 'ubuntu-latest'
+    env:
+      RUSTFLAGS: "-C link-self-contained=no"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -22,21 +24,15 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config \
-            libssl-dev zlib1g-dev \
-            clang libclang-dev \
-            libunwind-dev
-
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: 'ci-cache'
 
       - name: Set up just runner
         uses: extractions/setup-just@v2
+
+      - name: Install system dependencies
+        run: just ubuntu-essentials
 
       - name: Install tools
         run: just install-tools

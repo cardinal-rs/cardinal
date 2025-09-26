@@ -9,6 +9,7 @@ clippy:
     cargo clippy --all-features -- -D warnings
 
 cargo-test:
+    just ubuntu-essentials
     cargo test --all-features
 
 ubuntu-essentials:

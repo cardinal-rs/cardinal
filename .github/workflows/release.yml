@@ -44,7 +44,7 @@ jobs:
             cardinal-wasm-plugins
             cardinal-plugins
             cardinal-proxy
-            cardinal
+            cardinal-rs
             cardinal-cli
           )
           for crate in "${crates[@]}"; do

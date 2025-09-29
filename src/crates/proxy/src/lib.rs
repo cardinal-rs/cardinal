@@ -13,6 +13,8 @@ use pingora::upstreams::peer::Peer;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
+pub use pingora::*;
+
 pub trait CardinalContextProvider: Send + Sync {
     fn resolve(&self, session: &Session) -> Option<Arc<CardinalContext>>;
 }

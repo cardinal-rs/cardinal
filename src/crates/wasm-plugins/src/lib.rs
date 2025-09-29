@@ -8,7 +8,9 @@ mod host;
 pub mod instance;
 pub mod plugin;
 pub mod runner;
-mod utils;
+pub mod utils;
+
+pub use wasmer::*;
 
 #[derive(Clone, Builder)]
 pub struct ExecutionRequest {

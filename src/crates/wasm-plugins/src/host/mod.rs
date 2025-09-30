@@ -1,4 +1,4 @@
-use crate::runner::{ExecutionType, HostFunctionMap};
+use crate::runner::HostFunctionMap;
 use crate::utils::{read_bytes, with_mem_view, write_bytes};
 use crate::ExecutionContext;
 use std::collections::HashMap;
@@ -52,7 +52,6 @@ pub fn read_key_lookup_and_write(
 pub fn make_imports(
     store: &mut Store,
     env: &FunctionEnv<ExecutionContext>,
-    exec_type: ExecutionType,
     host_imports: Option<&HostFunctionMap>,
 ) -> Imports {
     let mut imports = Imports::new();
@@ -64,11 +63,8 @@ pub fn make_imports(
         "get_query_param",
         get_query_param::get_query_param(store, env),
     );
-
-    if let ExecutionType::Outbound = exec_type {
-        ns.insert("set_header", set_header::set_header(store, env));
-        ns.insert("set_status", set_status::set_status(store, env));
-    }
+    ns.insert("set_header", set_header::set_header(store, env));
+    ns.insert("set_status", set_status::set_status(store, env));
 
     if let Some(host_map) = host_imports {
         if let Some(extra_env) = host_map.get("env") {

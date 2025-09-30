@@ -7,11 +7,10 @@ use cardinal_base::provider::Provider;
 use cardinal_config::Plugin;
 use cardinal_errors::CardinalError;
 use cardinal_wasm_plugins::plugin::WasmPlugin;
-use cardinal_wasm_plugins::runner::{
-    ExecutionType, HostFunctionBuilder, HostFunctionMap, WasmRunner,
-};
+use cardinal_wasm_plugins::runner::{HostFunctionBuilder, HostFunctionMap, WasmRunner};
 use cardinal_wasm_plugins::wasmer::{Function, FunctionEnv, Store};
-use cardinal_wasm_plugins::{ExecutionContext, ExecutionRequest, ExecutionResponse};
+use cardinal_wasm_plugins::{ExecutionContext, ResponseState};
+use pingora::http::ResponseHeader;
 use pingora::prelude::Session;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -129,21 +128,26 @@ impl PluginContainer {
                     parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
 
                 {
-                    let runner = WasmRunner::new(wasm, ExecutionType::Inbound, self.host_imports());
+                    let runner = WasmRunner::new(wasm, self.host_imports());
 
-                    let inbound_ctx = ExecutionRequest {
+                    let inbound_ctx = ExecutionContext::from_parts(
+                        get_req_headers,
                         query,
-                        memory: None,
-                        req_headers: get_req_headers,
-                        body: None,
-                    };
+                        None,
+                        ResponseState::with_default_status(403),
+                    );
 
-                    let exec = runner.run(ExecutionContext::Inbound(inbound_ctx))?;
+                    let exec = runner.run(inbound_ctx)?;
 
                     if exec.should_continue {
                         Ok(MiddlewareResult::Continue)
                     } else {
-                        let _ = session.respond_error(403).await;
+                        let response_state = exec.execution_context.response();
+                        let header_response = Self::build_response_header(response_state);
+
+                        let _ = session.write_response_header(Box::new(header_response), true);
+
+                        let _ = session.respond_error(response_state.status()).await;
                         Ok(MiddlewareResult::Responded)
                     }
                 }
@@ -185,30 +189,28 @@ impl PluginContainer {
                         parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
 
                     {
-                        let runner =
-                            WasmRunner::new(wasm, ExecutionType::Outbound, self.host_imports());
+                        let runner = WasmRunner::new(wasm, self.host_imports());
 
-                        let outbound_ctx = ExecutionResponse {
-                            memory: None,
-                            req_headers: get_req_headers,
+                        let outbound_ctx = ExecutionContext::from_parts(
+                            get_req_headers,
                             query,
-                            resp_headers: Default::default(),
-                            status: 0,
-                            body: None,
-                        };
+                            None,
+                            ResponseState::default(),
+                        );
 
-                        let exec = runner.run(ExecutionContext::Outbound(outbound_ctx));
+                        let exec = runner.run(outbound_ctx);
 
                         match &exec {
                             Ok(ex) => {
-                                let outbound_resp = ex.execution_context.as_outbound().unwrap();
-                                for (key, val) in &outbound_resp.resp_headers {
+                                let response_state = ex.execution_context.response();
+
+                                for (key, val) in response_state.headers() {
                                     let _ =
                                         response.insert_header(key.to_string(), val.to_string());
                                 }
 
-                                if outbound_resp.status != 0 {
-                                    response.set_status(outbound_resp.status as u16).unwrap();
+                                if let Some(status) = response_state.status_override() {
+                                    let _ = response.set_status(status);
                                 }
                             }
                             Err(e) => {
@@ -219,6 +221,17 @@ impl PluginContainer {
                 }
             }
         }
+    }
+
+    fn build_response_header(response: &ResponseState) -> ResponseHeader {
+        let mut header = ResponseHeader::build(response.status(), None)
+            .expect("failed to build response header");
+
+        for (key, value) in response.headers() {
+            let _ = header.insert_header(key.to_string(), value.to_string());
+        }
+
+        header
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::host::make_imports;
 use crate::plugin::WasmPlugin;
-use crate::runner::{ExecutionType, HostFunctionMap};
-use crate::{ExecutionContext, ExecutionRequest, ExecutionResponse};
+use crate::runner::HostFunctionMap;
+use crate::ExecutionContext;
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use wasmer::{FunctionEnv, Instance, Memory, Store};
@@ -16,31 +16,15 @@ pub struct WasmInstance {
 impl WasmInstance {
     pub fn from_plugin(
         plugin: &WasmPlugin,
-        exec_type: ExecutionType,
         host_imports: Option<&HostFunctionMap>,
     ) -> Result<Self, CardinalError> {
         let mut store = Store::new(plugin.engine.clone());
 
-        let ctx = match exec_type {
-            ExecutionType::Inbound => ExecutionContext::Inbound(ExecutionRequest {
-                memory: None,
-                req_headers: Default::default(),
-                query: Default::default(),
-                body: None,
-            }),
-            ExecutionType::Outbound => ExecutionContext::Outbound(ExecutionResponse {
-                memory: None,
-                req_headers: Default::default(),
-                query: Default::default(),
-                resp_headers: Default::default(),
-                status: 200,
-                body: None,
-            }),
-        };
+        let ctx = ExecutionContext::default();
 
         let env = FunctionEnv::new(&mut store, ctx);
 
-        let imports = make_imports(&mut store, &env, exec_type, host_imports);
+        let imports = make_imports(&mut store, &env, host_imports);
 
         // Create the instance.
         let instance = Instance::new(&mut store, &plugin.module, &imports).map_err(|e| {

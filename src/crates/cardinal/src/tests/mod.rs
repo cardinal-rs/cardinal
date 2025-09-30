@@ -452,11 +452,10 @@ mod tests {
                                 let len = len.max(0);
                                 signal.store(len, Ordering::SeqCst);
 
-                                if let Some(outbound) = ctx.data_mut().as_outbound_mut() {
-                                    outbound
-                                        .resp_headers
-                                        .insert("x-env-signal".into(), "from-host".into());
-                                }
+                                ctx.data_mut()
+                                    .response_mut()
+                                    .headers_mut()
+                                    .insert("x-env-signal".into(), "from-host".into());
 
                                 if let Some(memory) = ctx.data().memory() {
                                     let store_ref = ctx.as_store_ref();
@@ -571,11 +570,10 @@ mod tests {
                                 signal.store(len, Ordering::SeqCst);
                                 touched.store(true, Ordering::SeqCst);
 
-                                if let Some(outbound) = ctx.data_mut().as_outbound_mut() {
-                                    outbound
-                                        .resp_headers
-                                        .insert("x-env-signal".into(), "from-host".into());
-                                }
+                                ctx.data_mut()
+                                    .response_mut()
+                                    .headers_mut()
+                                    .insert("x-env-signal".into(), "from-host".into());
 
                                 if let Some(memory) = ctx.data().memory() {
                                     let store = ctx.as_store_ref();

@@ -8,12 +8,6 @@ use std::sync::Arc;
 use wasmer::TypedFunction;
 use wasmer::{Function, FunctionEnv, Store};
 
-#[derive(Debug, Copy, Clone)]
-pub enum ExecutionType {
-    Inbound,
-    Outbound,
-}
-
 pub struct ExecutionResult {
     pub should_continue: bool,
     pub execution_context: ExecutionContext,
@@ -25,46 +19,24 @@ pub type HostFunctionMap = HashMap<String, Vec<(String, HostFunctionBuilder)>>;
 
 pub struct WasmRunner<'a> {
     pub plugin: &'a WasmPlugin,
-    pub execution_type: ExecutionType,
     host_imports: Option<&'a HostFunctionMap>,
 }
 
 impl<'a> WasmRunner<'a> {
-    pub fn new(
-        plugin: &'a WasmPlugin,
-        execution_type: ExecutionType,
-        host_imports: Option<&'a HostFunctionMap>,
-    ) -> Self {
+    pub fn new(plugin: &'a WasmPlugin, host_imports: Option<&'a HostFunctionMap>) -> Self {
         Self {
             plugin,
-            execution_type,
             host_imports,
         }
     }
 
     pub fn run(&self, exec_ctx: ExecutionContext) -> Result<ExecutionResult, CardinalError> {
         // 1) Instantiate a fresh instance per request
-        let mut instance =
-            WasmInstance::from_plugin(self.plugin, self.execution_type, self.host_imports)?;
+        let mut instance = WasmInstance::from_plugin(self.plugin, self.host_imports)?;
 
         {
             let ctx = instance.env.as_mut(&mut instance.store);
-            match ctx {
-                ExecutionContext::Inbound(inbound) => {
-                    let inbound_ctx = exec_ctx.as_inbound().unwrap().to_owned();
-                    inbound.req_headers = inbound_ctx.req_headers;
-                    inbound.query = inbound_ctx.query;
-                    inbound.body = inbound_ctx.body;
-                }
-                ExecutionContext::Outbound(outbound) => {
-                    let inbound_ctx = exec_ctx.as_outbound().unwrap().to_owned();
-                    outbound.req_headers = inbound_ctx.req_headers;
-                    outbound.query = inbound_ctx.query;
-                    outbound.body = inbound_ctx.body;
-                    outbound.resp_headers = inbound_ctx.resp_headers;
-                    outbound.status = inbound_ctx.status;
-                }
-            }
+            *ctx = exec_ctx;
         }
 
         // 3) Get exports

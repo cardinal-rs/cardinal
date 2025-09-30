@@ -23,14 +23,10 @@ fn set_header_raw(
         Err(_) => return,
     };
 
-    match ctx.data_mut() {
-        ExecutionContext::Inbound(_) => {
-            tracing::error!("Set header called in an inbound function");
-        }
-        ExecutionContext::Outbound(outbound) => {
-            outbound.resp_headers.insert(name, value);
-        }
-    }
+    ctx.data_mut()
+        .response_mut()
+        .headers_mut()
+        .insert(name, value);
 }
 
 pub fn set_header(store: &mut Store, env: &FunctionEnv<ExecutionContext>) -> Function {

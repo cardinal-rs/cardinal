@@ -134,19 +134,20 @@ impl PluginContainer {
                         get_req_headers,
                         query,
                         None,
-                        ResponseState::with_default_status(403),
+                        ResponseState::with_default_status(200),
                     );
 
                     let exec = runner.run(inbound_ctx)?;
 
+                    let response_state = exec.execution_context.response();
+                    let header_response = Self::build_response_header(response_state);
+                    let _ = session
+                        .write_response_header(Box::new(header_response), false)
+                        .await;
+
                     if exec.should_continue {
                         Ok(MiddlewareResult::Continue)
                     } else {
-                        let response_state = exec.execution_context.response();
-                        let header_response = Self::build_response_header(response_state);
-
-                        let _ = session.write_response_header(Box::new(header_response), true);
-
                         let _ = session.respond_error(response_state.status()).await;
                         Ok(MiddlewareResult::Responded)
                     }

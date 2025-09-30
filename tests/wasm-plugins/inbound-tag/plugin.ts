@@ -6,6 +6,9 @@ declare function host_get_header(
   outCap: i32
 ): i32;
 
+@external("env", "set_status")
+declare function host_set_status(code: i32): void;
+
 function utf8ptr(s: string): i32 {
   return changetype<i32>(String.UTF8.encode(s, false));
 }
@@ -36,6 +39,8 @@ export function handle(_ptr: i32, _len: i32): i32 {
   if (allowHeader != null && allowHeader.toLowerCase() == "true") {
     return 1;
   }
+
+  host_set_status(403);
   return 0;
 }
 

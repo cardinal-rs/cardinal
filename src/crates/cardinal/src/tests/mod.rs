@@ -752,9 +752,11 @@ mod tests {
         let _cardinal_thread = spawn_cardinal(cardinal);
         wait_for_startup().await;
 
-        let err = ureq::get(&http_url(&server_addr, "/posts/post"))
-            .call()
-            .expect_err("expected backend rejection when plugin not triggered");
+        let err = ureq::get(&http_url(&server_addr, "/posts/post")).call();
+
+        println!("{:?}", err);
+
+        let err = err.expect_err("expected backend rejection when plugin not triggered");
 
         expect_status(err, 403);
 

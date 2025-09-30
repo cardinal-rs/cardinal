@@ -2,7 +2,7 @@ use ::wasmer::Memory;
 use bytes::Bytes;
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ResponseState {
     headers: HashMap<String, String>,
     status: u16,
@@ -64,7 +64,7 @@ pub mod wasmer {
     pub use wasmer::*;
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct ExecutionContext {
     memory: Option<Memory>,
     req_headers: HashMap<String, String>,
@@ -93,8 +93,8 @@ impl ExecutionContext {
     ) -> Self {
         Self {
             memory: None,
-            req_headers,
-            query,
+            req_headers: normalize_headers(req_headers),
+            query: normalize_query(query),
             body,
             response,
         }
@@ -143,6 +143,20 @@ impl ExecutionContext {
     pub fn response_mut(&mut self) -> &mut ResponseState {
         &mut self.response
     }
+}
+
+fn normalize_headers(headers: HashMap<String, String>) -> HashMap<String, String> {
+    headers
+        .into_iter()
+        .map(|(k, v)| (k.to_ascii_lowercase(), v))
+        .collect()
+}
+
+fn normalize_query(query: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+    query
+        .into_iter()
+        .map(|(k, v)| (k.to_ascii_lowercase(), v))
+        .collect()
 }
 
 #[cfg(test)]
@@ -273,7 +287,7 @@ mod tests {
     fn execution_context_from_value(
         value: &Value,
         scenario_kind: ScenarioKind,
-        scenario: &str,
+        _scenario: &str,
     ) -> ExecutionContext {
         let req_headers = lowercase_string_map(json_string_map(value.get("req_headers")));
         let query = lowercase_string_vec_map(json_string_vec_map(value.get("query")));

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use wasmer::TypedFunction;
 use wasmer::{Function, FunctionEnv, Store};
 
+#[derive(Debug)]
 pub struct ExecutionResult {
     pub should_continue: bool,
     pub execution_context: ExecutionContext,
@@ -36,7 +37,9 @@ impl<'a> WasmRunner<'a> {
 
         {
             let ctx = instance.env.as_mut(&mut instance.store);
+            let memory = ctx.memory().clone();
             *ctx = exec_ctx;
+            *ctx.memory_mut() = memory;
         }
 
         // 3) Get exports

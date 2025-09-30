@@ -13,15 +13,11 @@ mod tests {
     use cardinal_plugins::container::{PluginBuiltInType, PluginContainer, PluginHandler};
     use cardinal_plugins::headers::CARDINAL_PARAMS_HEADER_BASE;
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
-    use cardinal_plugins::utils::parse_query_string_multi;
     use cardinal_proxy::CardinalContextProvider;
     use cardinal_wasm_plugins::plugin::WasmPlugin;
-    use cardinal_wasm_plugins::runner::WasmRunner;
-    use cardinal_wasm_plugins::ExecutionContext;
     use pingora::proxy::Session;
-    use std::collections::HashMap;
     use std::path::Path;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
     use std::thread::JoinHandle;
     use std::time::Duration;
@@ -403,6 +399,79 @@ mod tests {
         expect_status(err, 402);
 
         assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn wasm_host_import_invokes_custom_function() {
+        use cardinal_wasm_plugins::wasmer::{Function, Store};
+
+        let config = load_test_config("wasm_host_import.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "host");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            backend_addr,
+            vec![Route::new(Method::Get, "/post", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("host-import-ok");
+                let _ = request.respond(response).unwrap();
+            })],
+        );
+
+        let host_signal_value = Arc::new(AtomicI32::new(0));
+        let host_signal_for_factory = host_signal_value.clone();
+        let host_plugin_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/wasm-plugins/host-signal/plugin.wasm");
+
+        let cardinal = Cardinal::builder(config)
+            .register_provider_with_factory::<PluginContainer, _>(
+                ProviderScope::Singleton,
+                move |_ctx| {
+                    let wasm_plugin = WasmPlugin::from_path(&host_plugin_path).map_err(|e| {
+                        CardinalError::Other(format!("Failed to load host plugin: {}", e))
+                    })?;
+
+                    let plugin_arc = Arc::new(wasm_plugin);
+                    let mut container = PluginContainer::new();
+
+                    let host_signal_for_fn = host_signal_for_factory.clone();
+                    container.add_host_function("env", "host_signal", move |store| {
+                        let signal = host_signal_for_fn.clone();
+                        Function::new_typed(store, move |value: i32| -> i32 {
+                            signal.store(value, Ordering::SeqCst);
+                            0
+                        })
+                    });
+                    container
+                        .add_plugin("host_plugin".to_string(), PluginHandler::Wasm(plugin_arc));
+
+                    Ok(container)
+                },
+            )
+            .build();
+
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/host/post"))
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "host-import-ok");
+
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(host_signal_value.load(Ordering::SeqCst), 7);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-host-signal")
+                .and_then(|v| v.to_str().ok()),
+            Some("called")
+        );
     }
 
     #[tokio::test]

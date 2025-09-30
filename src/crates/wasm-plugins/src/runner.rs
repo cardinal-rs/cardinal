@@ -3,7 +3,10 @@ use crate::plugin::WasmPlugin;
 use crate::ExecutionContext;
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
+use std::collections::HashMap;
+use std::sync::Arc;
 use wasmer::TypedFunction;
+use wasmer::{Function, Store};
 
 #[derive(Debug, Copy, Clone)]
 pub enum ExecutionType {
@@ -16,22 +19,32 @@ pub struct ExecutionResult {
     pub execution_context: ExecutionContext,
 }
 
+pub type HostFunctionBuilder = Arc<dyn Fn(&mut Store) -> Function + Send + Sync>;
+pub type HostFunctionMap = HashMap<String, Vec<(String, HostFunctionBuilder)>>;
+
 pub struct WasmRunner<'a> {
     pub plugin: &'a WasmPlugin,
     pub execution_type: ExecutionType,
+    host_imports: Option<&'a HostFunctionMap>,
 }
 
 impl<'a> WasmRunner<'a> {
-    pub fn new(plugin: &'a WasmPlugin, execution_type: ExecutionType) -> Self {
+    pub fn new(
+        plugin: &'a WasmPlugin,
+        execution_type: ExecutionType,
+        host_imports: Option<&'a HostFunctionMap>,
+    ) -> Self {
         Self {
             plugin,
             execution_type,
+            host_imports,
         }
     }
 
     pub fn run(&self, exec_ctx: ExecutionContext) -> Result<ExecutionResult, CardinalError> {
         // 1) Instantiate a fresh instance per request
-        let mut instance = WasmInstance::from_plugin(self.plugin, self.execution_type)?;
+        let mut instance =
+            WasmInstance::from_plugin(self.plugin, self.execution_type, self.host_imports)?;
 
         {
             let ctx = instance.env.as_mut(&mut instance.store);
@@ -60,8 +73,7 @@ impl<'a> WasmRunner<'a> {
             .get_typed_function(&instance.store, "handle")
             .map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                    "missing `handle` export {}",
-                    e
+                    "missing `handle` export {e}"
                 )))
             })?;
 
@@ -71,8 +83,7 @@ impl<'a> WasmRunner<'a> {
             .get_typed_function(&instance.store, "__new")
             .map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                    "missing `alloc` export {}",
-                    e
+                    "missing `alloc` export {e}"
                 )))
             })?;
 
@@ -86,8 +97,7 @@ impl<'a> WasmRunner<'a> {
 
             let p = alloc.call(&mut instance.store, len, 0).map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                    "Alloc failed {}",
-                    e
+                    "Alloc failed {e}"
                 )))
             })?;
 
@@ -95,8 +105,7 @@ impl<'a> WasmRunner<'a> {
                 let view = instance.memory.view(&instance.store);
                 view.write(p as u64, &body).map_err(|e| {
                     CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                        "Writing Body failed {}",
-                        e
+                        "Writing Body failed {e}"
                     )))
                 })?;
             }
@@ -108,8 +117,7 @@ impl<'a> WasmRunner<'a> {
 
         let decision = handle.call(&mut instance.store, ptr, len).map_err(|e| {
             CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                "WASM Handle call failed {}",
-                e
+                "WASM Handle call failed {e}"
             )))
         })?;
 

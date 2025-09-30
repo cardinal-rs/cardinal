@@ -1,0 +1,8 @@
+{
+  "should_continue": true,
+  "execution_type": "Outbound",
+  "resp_headers": {
+    "x-host-signal": "called"
+  },
+  "status": 200
+}

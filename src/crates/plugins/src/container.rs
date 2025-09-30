@@ -7,7 +7,9 @@ use cardinal_base::provider::Provider;
 use cardinal_config::Plugin;
 use cardinal_errors::CardinalError;
 use cardinal_wasm_plugins::plugin::WasmPlugin;
-use cardinal_wasm_plugins::runner::{ExecutionType, WasmRunner};
+use cardinal_wasm_plugins::runner::{
+    ExecutionType, HostFunctionBuilder, HostFunctionMap, WasmRunner,
+};
 use cardinal_wasm_plugins::{ExecutionContext, ExecutionRequest, ExecutionResponse};
 use pingora::prelude::Session;
 use std::collections::HashMap;
@@ -26,18 +28,21 @@ pub enum PluginHandler {
 
 pub struct PluginContainer {
     plugins: HashMap<String, Arc<PluginHandler>>,
+    host_imports: HostFunctionMap,
 }
 
 impl PluginContainer {
     pub fn new() -> Self {
         Self {
             plugins: HashMap::from_iter(Self::builtin_plugins()),
+            host_imports: HashMap::new(),
         }
     }
 
     pub fn new_empty() -> Self {
         Self {
             plugins: HashMap::new(),
+            host_imports: HashMap::new(),
         }
     }
 
@@ -58,6 +63,41 @@ impl PluginContainer {
         self.plugins.remove(name);
     }
 
+    pub fn add_host_function<F>(
+        &mut self,
+        namespace: impl Into<String>,
+        name: impl Into<String>,
+        builder: F,
+    ) where
+        F: Fn(&mut cardinal_wasm_plugins::wasmer::Store) -> cardinal_wasm_plugins::wasmer::Function
+            + Send
+            + Sync
+            + 'static,
+    {
+        let ns = namespace.into();
+        let host_entry = self.host_imports.entry(ns).or_default();
+        let builder: HostFunctionBuilder = Arc::new(builder);
+        host_entry.push((name.into(), builder));
+    }
+
+    pub fn extend_host_functions<I, S>(&mut self, namespace: S, functions: I)
+    where
+        I: IntoIterator<Item = (String, HostFunctionBuilder)>,
+        S: Into<String>,
+    {
+        let ns = namespace.into();
+        let host_entry = self.host_imports.entry(ns).or_default();
+        host_entry.extend(functions);
+    }
+
+    fn host_imports(&self) -> Option<&HostFunctionMap> {
+        if self.host_imports.is_empty() {
+            None
+        } else {
+            Some(&self.host_imports)
+        }
+    }
+
     pub async fn run_request_filter(
         &self,
         name: &str,
@@ -68,7 +108,7 @@ impl PluginContainer {
         let plugin = self
             .plugins
             .get(name)
-            .ok_or_else(|| CardinalError::Other(format!("Plugin {} does not exist", name)))?;
+            .ok_or_else(|| CardinalError::Other(format!("Plugin {name} does not exist")))?;
 
         match plugin.as_ref() {
             PluginHandler::Builtin(builtin) => match builtin {
@@ -76,8 +116,7 @@ impl PluginContainer {
                     filter.on_request(session, backend, ctx).await
                 }
                 PluginBuiltInType::Outbound(_) => Err(CardinalError::Other(format!(
-                    "The filter {} is not a request filter",
-                    name
+                    "The filter {name} is not a request filter"
                 ))),
             },
             PluginHandler::Wasm(wasm) => {
@@ -92,7 +131,7 @@ impl PluginContainer {
                     parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
 
                 {
-                    let runner = WasmRunner::new(wasm, ExecutionType::Inbound);
+                    let runner = WasmRunner::new(wasm, ExecutionType::Inbound, self.host_imports());
 
                     let inbound_ctx = ExecutionRequest {
                         query,
@@ -125,13 +164,13 @@ impl PluginContainer {
         let plugin = self
             .plugins
             .get(name)
-            .ok_or_else(|| CardinalError::Other(format!("Plugin {} does not exist", name)));
+            .ok_or_else(|| CardinalError::Other(format!("Plugin {name} does not exist")));
 
         if let Ok(plugin) = plugin {
             match plugin.as_ref() {
                 PluginHandler::Builtin(builtin) => match builtin {
                     PluginBuiltInType::Inbound(_) => {
-                        error!("The filter {} is not a response filter", name);
+                        error!("The filter {name} is not a response filter");
                     }
                     PluginBuiltInType::Outbound(filter) => {
                         filter.on_response(session, backend, response, ctx).await
@@ -148,7 +187,8 @@ impl PluginContainer {
                         parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
 
                     {
-                        let runner = WasmRunner::new(wasm, ExecutionType::Outbound);
+                        let runner =
+                            WasmRunner::new(wasm, ExecutionType::Outbound, self.host_imports());
 
                         let outbound_ctx = ExecutionResponse {
                             memory: None,
@@ -169,7 +209,9 @@ impl PluginContainer {
                                         response.insert_header(key.to_string(), val.to_string());
                                 }
 
-                                response.set_status(outbound_resp.status as u16).unwrap();
+                                if outbound_resp.status != 0 {
+                                    response.set_status(outbound_resp.status as u16).unwrap();
+                                }
                             }
                             Err(e) => {
                                 error!("Failed to run plugin {}: {}", name, e);

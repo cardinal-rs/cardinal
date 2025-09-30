@@ -19,10 +19,10 @@ pub(crate) fn rewrite_request_path(req: &mut RequestHeader, backend_id: &str, fo
             None => (pq_str, None),
         };
 
-        if let Some(stripped) = path_part.strip_prefix(&format!("/{}", backend_id)) {
+        if let Some(stripped) = path_part.strip_prefix(&format!("/{backend_id}")) {
             let new_path = if stripped.is_empty() { "/" } else { stripped };
             let new_pq = match query_part {
-                Some(q) if !q.is_empty() => format!("{}?{}", new_path, q),
+                Some(q) if !q.is_empty() => format!("{new_path}?{q}"),
                 _ => new_path.to_string(),
             };
 
@@ -69,14 +69,14 @@ pub(crate) fn compose_upstream_url(
     let scheme = if is_tls { "https" } else { "http" };
     let mut hostport = host.to_string();
     if (is_tls && port != 443) || (!is_tls && port != 80) {
-        hostport = format!("{}:{}", host, port);
+        hostport = format!("{host}:{port}");
     }
     let pq = if path_and_query.starts_with('/') {
         path_and_query.to_string()
     } else {
-        format!("/{}", path_and_query)
+        format!("/{path_and_query}")
     };
-    format!("{}://{}{}", scheme, hostport, pq)
+    format!("{scheme}://{hostport}{pq}")
 }
 
 pub(crate) fn set_upstream_host_headers(
@@ -87,7 +87,7 @@ pub(crate) fn set_upstream_host_headers(
     let header_host = if (up_tls && up_port == 443) || (!up_tls && up_port == 80) {
         up_host.clone()
     } else {
-        format!("{}:{}", up_host, up_port)
+        format!("{up_host}:{up_port}")
     };
 
     // Preserve original Host

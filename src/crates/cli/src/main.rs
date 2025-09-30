@@ -17,7 +17,7 @@ fn main() {
     };
 
     if let Err(e) = cmd {
-        eprintln!("{}", e);
+        eprintln!("{e}");
         std::process::exit(1);
     }
 }

@@ -1,6 +1,6 @@
 use crate::host::make_imports;
 use crate::plugin::WasmPlugin;
-use crate::runner::ExecutionType;
+use crate::runner::{ExecutionType, HostFunctionMap};
 use crate::{ExecutionContext, ExecutionRequest, ExecutionResponse};
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
@@ -17,6 +17,7 @@ impl WasmInstance {
     pub fn from_plugin(
         plugin: &WasmPlugin,
         exec_type: ExecutionType,
+        host_imports: Option<&HostFunctionMap>,
     ) -> Result<Self, CardinalError> {
         let mut store = Store::new(plugin.engine.clone());
 
@@ -39,13 +40,12 @@ impl WasmInstance {
 
         let env = FunctionEnv::new(&mut store, ctx);
 
-        let imports = make_imports(&mut store, &env, exec_type);
+        let imports = make_imports(&mut store, &env, exec_type, host_imports);
 
         // Create the instance.
         let instance = Instance::new(&mut store, &plugin.module, &imports).map_err(|e| {
             CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                "Error creating WASM Instance {}",
-                e
+                "Error creating WASM Instance {e}"
             )))
         })?;
 
@@ -57,8 +57,7 @@ impl WasmInstance {
             .get_memory(memory_name)
             .map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                    "missing memory export `{}`: {}",
-                    memory_name, e
+                    "missing memory export `{memory_name}`: {e}"
                 )))
             })?
             .clone();

@@ -1,4 +1,4 @@
-use crate::runner::ExecutionType;
+use crate::runner::{ExecutionType, HostFunctionMap};
 use crate::utils::{read_bytes, with_mem_view, write_bytes};
 use crate::ExecutionContext;
 use std::collections::HashMap;
@@ -53,6 +53,7 @@ pub fn make_imports(
     store: &mut Store,
     env: &FunctionEnv<ExecutionContext>,
     exec_type: ExecutionType,
+    host_imports: Option<&HostFunctionMap>,
 ) -> Imports {
     let mut imports = Imports::new();
     let mut ns = Exports::new();
@@ -69,6 +70,32 @@ pub fn make_imports(
         ns.insert("set_status", set_status::set_status(store, env));
     }
 
+    if let Some(host_map) = host_imports {
+        if let Some(extra_env) = host_map.get("env") {
+            for (name, builder) in extra_env {
+                let function = builder(store);
+                ns.insert(name.as_str(), function);
+            }
+        }
+    }
+
     imports.register_namespace("env", ns);
+
+    if let Some(host_map) = host_imports {
+        for (namespace, functions) in host_map {
+            if namespace == "env" {
+                continue;
+            }
+
+            let mut exports = Exports::new();
+            for (name, builder) in functions {
+                let function = builder(store);
+                exports.insert(name.as_str(), function);
+            }
+
+            imports.register_namespace(namespace, exports);
+        }
+    }
+
     imports
 }

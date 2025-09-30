@@ -13,7 +13,9 @@ use pingora::upstreams::peer::Peer;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-pub use pingora::*;
+pub mod pingora {
+    pub use pingora::*;
+}
 
 pub trait CardinalContextProvider: Send + Sync {
     fn resolve(&self, session: &Session) -> Option<Arc<CardinalContext>>;
@@ -157,7 +159,7 @@ impl ProxyHttp for CardinalProxy {
                 // Determine origin parts for TLS and SNI
                 let (host, port, is_tls) = parse_origin(&backend.destination.url)
                     .map_err(|_| Error::new_str("Origin could not be parsed "))?;
-                let hostport = format!("{}:{}", host, port);
+                let hostport = format!("{host}:{port}");
 
                 // Compose full upstream URL for logging with normalized scheme
                 let path_and_query = _session

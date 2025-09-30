@@ -25,7 +25,7 @@ impl RequestMiddleware for RestrictedRouteMiddleware {
                     let req_header = session.req_header_mut();
                     for (k, v) in params {
                         req_header
-                            .insert_header(format!("{}{}", CARDINAL_PARAMS_HEADER_BASE, k), v)
+                            .insert_header(format!("{CARDINAL_PARAMS_HEADER_BASE}{k}"), v)
                             .unwrap();
                     }
                 }

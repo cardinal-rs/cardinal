@@ -1,8 +1,8 @@
+use ::wasmer::Memory;
 use bytes::Bytes;
 use derive_builder::Builder;
 use enum_as_inner::EnumAsInner;
 use std::collections::HashMap;
-use wasmer::Memory;
 
 mod host;
 pub mod instance;
@@ -10,7 +10,9 @@ pub mod plugin;
 pub mod runner;
 pub mod utils;
 
-pub use wasmer::*;
+pub mod wasmer {
+    pub use wasmer::*;
+}
 
 #[derive(Clone, Builder)]
 pub struct ExecutionRequest {
@@ -145,7 +147,7 @@ mod tests {
 
         let exec_ctx = execution_context_from_value(&incoming, expected.execution_type, name);
 
-        let runner = WasmRunner::new(&wasm_plugin, expected.execution_type);
+        let runner = WasmRunner::new(&wasm_plugin, expected.execution_type, None);
         let result = runner
             .run(exec_ctx)
             .unwrap_or_else(|e| panic!("plugin execution failed for {:?}: {}", wasm_path, e));

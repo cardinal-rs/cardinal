@@ -53,8 +53,7 @@ impl WasmPlugin {
         let engine = engine.unwrap_or_default();
         let module = Module::new(&engine, bytes).map_err(|e| {
             CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                "Error initiating plugin {}",
-                e
+                "Error initiating plugin {e}"
             )))
         })?;
 
@@ -89,8 +88,7 @@ impl WasmPlugin {
         let missing: Vec<_> = required.difference(&found).cloned().collect();
         if !missing.is_empty() {
             return Err(CardinalError::Other(format!(
-                "wasm plugin missing required exports: {:?}",
-                missing
+                "wasm plugin missing required exports: {missing:?}"
             )));
         }
 

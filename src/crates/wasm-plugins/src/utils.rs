@@ -15,14 +15,14 @@ pub(crate) fn with_mem_view<'a>(
     Ok(mem.view(ctx))
 }
 
-pub(crate) fn read_bytes(view: &MemoryView, ptr: i32, len: i32) -> Result<Vec<u8>, CardinalError> {
+pub fn read_bytes(view: &MemoryView, ptr: i32, len: i32) -> Result<Vec<u8>, CardinalError> {
     let mut buf = vec![0u8; len as usize];
     view.read(ptr as u64, &mut buf)
         .map_err(|e| InternalError(CardinalInternalError::InvalidWasmModule(e.to_string())))?;
     Ok(buf)
 }
 
-pub(crate) fn write_bytes(view: &MemoryView, ptr: i32, data: &[u8]) -> Result<(), CardinalError> {
+pub fn write_bytes(view: &MemoryView, ptr: i32, data: &[u8]) -> Result<(), CardinalError> {
     view.write(ptr as u64, data)
         .map_err(|e| InternalError(CardinalInternalError::InvalidWasmModule(e.to_string())))
 }

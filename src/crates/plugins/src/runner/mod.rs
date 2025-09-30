@@ -5,11 +5,12 @@ use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::CardinalError;
 use pingora::http::ResponseHeader;
 use pingora::proxy::Session;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MiddlewareResult {
-    Continue,
+    Continue(HashMap<String, String>),
     Responded,
 }
 
@@ -70,13 +71,18 @@ impl PluginRunner {
         backend: Arc<DestinationWrapper>,
     ) -> Result<MiddlewareResult, CardinalError> {
         let filter_container = self.context.get::<PluginContainer>().await?;
+        let mut resp_headers = HashMap::new();
 
         for filter in self.global_request_filters() {
             let run = filter_container
                 .run_request_filter(filter, session, backend.clone(), self.context.clone())
                 .await?;
-            if let MiddlewareResult::Responded = run {
-                return Ok(MiddlewareResult::Responded);
+
+            match run {
+                MiddlewareResult::Continue(middleware_resp_headers) => {
+                    resp_headers.extend(middleware_resp_headers)
+                }
+                MiddlewareResult::Responded => return Ok(MiddlewareResult::Responded),
             }
         }
 
@@ -90,12 +96,16 @@ impl PluginRunner {
                     self.context.clone(),
                 )
                 .await?;
-            if let MiddlewareResult::Responded = run {
-                return Ok(MiddlewareResult::Responded);
+
+            match run {
+                MiddlewareResult::Continue(middleware_resp_headers) => {
+                    resp_headers.extend(middleware_resp_headers)
+                }
+                MiddlewareResult::Responded => return Ok(MiddlewareResult::Responded),
             }
         }
 
-        Ok(MiddlewareResult::Continue)
+        Ok(MiddlewareResult::Continue(resp_headers))
     }
 
     pub async fn run_response_filters(

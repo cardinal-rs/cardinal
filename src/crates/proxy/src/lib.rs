@@ -10,6 +10,7 @@ use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::protocols::Digest;
 use pingora::upstreams::peer::Peer;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
@@ -144,7 +145,11 @@ impl ProxyHttp for CardinalProxy {
         *ctx = Some(request_state);
 
         match res {
-            MiddlewareResult::Continue => Ok(false),
+            MiddlewareResult::Continue(resp_headers) => {
+                ctx.as_mut().unwrap().response_headers = Some(resp_headers);
+
+                Ok(false)
+            }
             MiddlewareResult::Responded => Ok(true),
         }
     }
@@ -214,6 +219,12 @@ impl ProxyHttp for CardinalProxy {
         ctx: &mut Self::CTX,
     ) -> Result<()> {
         if let Some(state) = ctx.as_mut() {
+            if let Some(resp_headers) = state.response_headers.take() {
+                for (key, val) in resp_headers {
+                    let _ = upstream_response.insert_header(key, val);
+                }
+            }
+
             if let Some(backend) = state.backend.clone() {
                 state
                     .runner
@@ -251,6 +262,7 @@ pub struct RequestContext {
     pub context: Arc<CardinalContext>,
     pub backend: Option<Arc<DestinationWrapper>>,
     pub runner: PluginRunner,
+    pub response_headers: Option<HashMap<String, String>>,
 }
 
 impl RequestContext {
@@ -260,6 +272,7 @@ impl RequestContext {
             context,
             backend: None,
             runner,
+            response_headers: None,
         }
     }
 }

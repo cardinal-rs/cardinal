@@ -17,6 +17,7 @@ mod tests {
     use cardinal_wasm_plugins::plugin::WasmPlugin;
     use cardinal_wasm_plugins::wasmer::AsStoreRef;
     use pingora::proxy::Session;
+    use std::collections::HashMap;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
@@ -975,7 +976,7 @@ mod tests {
             _cardinal: Arc<CardinalContext>,
         ) -> Result<MiddlewareResult, CardinalError> {
             self.hits.fetch_add(1, Ordering::SeqCst);
-            Ok(MiddlewareResult::Continue)
+            Ok(MiddlewareResult::Continue(HashMap::new()))
         }
     }
 

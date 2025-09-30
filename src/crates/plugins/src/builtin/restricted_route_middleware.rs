@@ -4,6 +4,7 @@ use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::CardinalError;
 use pingora::proxy::Session;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct RestrictedRouteMiddleware;
@@ -30,13 +31,13 @@ impl RequestMiddleware for RestrictedRouteMiddleware {
                     }
                 }
 
-                Ok(MiddlewareResult::Continue)
+                Ok(MiddlewareResult::Continue(HashMap::new()))
             } else {
                 let _ = session.respond_error(402).await;
                 Ok(MiddlewareResult::Responded)
             }
         } else {
-            Ok(MiddlewareResult::Continue)
+            Ok(MiddlewareResult::Continue(HashMap::new()))
         }
     }
 }

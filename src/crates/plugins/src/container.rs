@@ -137,17 +137,33 @@ impl PluginContainer {
                         ResponseState::with_default_status(200),
                     );
 
-                    let exec = runner.run(inbound_ctx)?;
+                    let mut exec = runner.run(inbound_ctx)?;
 
-                    let response_state = exec.execution_context.response();
-                    let header_response = Self::build_response_header(response_state);
-                    let _ = session
-                        .write_response_header(Box::new(header_response), false)
-                        .await;
+                    if !exec.execution_context.req_headers().is_empty() {
+                        for (key, val) in exec.execution_context.req_headers() {
+                            let _ = session.req_header_mut().insert_header(key.to_string(), val);
+                        }
+                    }
+
+                    if exec
+                        .execution_context
+                        .response()
+                        .status_override()
+                        .is_some()
+                    {
+                        exec.should_continue = false;
+                    }
 
                     if exec.should_continue {
-                        Ok(MiddlewareResult::Continue)
+                        Ok(MiddlewareResult::Continue(
+                            exec.execution_context.response().headers().clone(),
+                        ))
                     } else {
+                        let response_state = exec.execution_context.response();
+                        let header_response = Self::build_response_header(response_state);
+                        let _ = session
+                            .write_response_header(Box::new(header_response), false)
+                            .await;
                         let _ = session.respond_error(response_state.status()).await;
                         Ok(MiddlewareResult::Responded)
                     }

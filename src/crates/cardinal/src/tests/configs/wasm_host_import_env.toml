@@ -1,0 +1,15 @@
+[server]
+address = "127.0.0.1:1833"
+force_path_parameter = true
+log_upstream_response = false
+global_request_middleware = []
+global_response_middleware = ["host_plugin"]
+
+[destinations.host]
+name = "host"
+url = "127.0.0.1:2933"
+routes = []
+middleware = []
+
+[[plugins]]
+wasm = { name = "host_plugin", path = "../../../tests/wasm-plugins/host-signal/plugin.wasm" }

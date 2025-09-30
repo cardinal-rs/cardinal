@@ -520,7 +520,7 @@ mod tests {
     async fn wasm_host_import_can_mutate_env_memory() {
         use cardinal_wasm_plugins::wasmer::{Function, FunctionEnvMut, Store};
 
-        let config = load_test_config("wasm_host_import.toml");
+        let config = load_test_config("wasm_host_import_env.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "host");
 

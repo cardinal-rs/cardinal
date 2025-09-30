@@ -213,6 +213,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_middleware_headers_are_applied_to_response() {
+        let mut config = load_test_config("global_request_middleware.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("request-middleware-ok");
+                let _ = request.respond(response).unwrap();
+            })],
+        );
+
+        let middleware_hits = Arc::new(AtomicUsize::new(0));
+        let middleware_hits_clone = middleware_hits.clone();
+        let plugin_name = "HeaderPropagatingRequest".to_string();
+        config.server.global_request_middleware = vec![plugin_name.clone()];
+        let plugin_name_clone = plugin_name.clone();
+
+        let cardinal = cardinal_with_plugin_factory(config, move |container| {
+            let mut headers = HashMap::new();
+            headers.insert("x-request-middleware".to_string(), "propagated".to_string());
+
+            container.add_plugin(
+                plugin_name_clone.clone(),
+                PluginHandler::Builtin(PluginBuiltInType::Inbound(Arc::new(
+                    TestRequestHeaderMiddleware {
+                        hits: middleware_hits_clone.clone(),
+                        headers,
+                    },
+                ))),
+            );
+        });
+
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let header_value = response
+            .headers()
+            .get("x-request-middleware")
+            .and_then(|v| v.to_str().ok());
+        assert_eq!(header_value, Some("propagated"));
+
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "request-middleware-ok");
+
+        assert_eq!(middleware_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn global_response_middleware_decorates_response() {
         let config = load_test_config("global_response_middleware.toml");
         let server_addr = config.server.address.clone();
@@ -765,6 +824,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_middleware_status_override_short_circuits() {
+        let mut config = load_test_config("global_request_middleware.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("should-not-hit");
+                let _ = request.respond(response).unwrap();
+            })],
+        );
+
+        let plugin_name = "WasmStatusShortCircuit".to_string();
+        config.server.global_request_middleware = vec![plugin_name.clone()];
+        let plugin_name_clone = plugin_name.clone();
+        let wasm_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/wasm-plugins/inbound-tag/plugin.wasm");
+        let wasm_path_clone = wasm_path.clone();
+
+        let cardinal = Cardinal::builder(config)
+            .register_provider_with_factory::<PluginContainer, _>(
+                ProviderScope::Singleton,
+                move |_ctx| {
+                    let wasm_plugin = WasmPlugin::from_path(&wasm_path_clone).map_err(|e| {
+                        CardinalError::Other(format!(
+                            "Failed to load wasm status middleware plugin: {}",
+                            e
+                        ))
+                    })?;
+
+                    let mut container = PluginContainer::new();
+                    container.add_plugin(
+                        plugin_name_clone.clone(),
+                        PluginHandler::Wasm(Arc::new(wasm_plugin)),
+                    );
+
+                    Ok(container)
+                },
+            )
+            .build();
+
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let err = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .expect_err("expected request middleware to short circuit with status override");
+
+        expect_status(err, 403);
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn wasm_outbound_plugin_adds_response_headers_for_client() {
         let config = load_test_config("wasm_outbound_header_set.toml");
         let server_addr = config.server.address.clone();
@@ -1015,6 +1131,24 @@ mod tests {
             self.hits.fetch_add(1, Ordering::SeqCst);
             let _ = session.respond_error(418).await;
             Ok(MiddlewareResult::Responded)
+        }
+    }
+
+    struct TestRequestHeaderMiddleware {
+        hits: Arc<AtomicUsize>,
+        headers: HashMap<String, String>,
+    }
+
+    #[async_trait]
+    impl RequestMiddleware for TestRequestHeaderMiddleware {
+        async fn on_request(
+            &self,
+            _session: &mut Session,
+            _backend: Arc<DestinationWrapper>,
+            _cardinal: Arc<CardinalContext>,
+        ) -> Result<MiddlewareResult, CardinalError> {
+            self.hits.fetch_add(1, Ordering::SeqCst);
+            Ok(MiddlewareResult::Continue(self.headers.clone()))
         }
     }
 }

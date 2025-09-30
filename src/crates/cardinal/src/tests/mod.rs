@@ -272,6 +272,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wasm_request_middleware_propagates_headers() {
+        let config = load_test_config("wasm_request_header_set.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("wasm-request-ok");
+                let _ = request.respond(response).unwrap();
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let headers = response.headers();
+        let decision = headers
+            .get("x-decision")
+            .and_then(|v| v.to_str().ok());
+        assert_eq!(decision, Some("allowed"));
+
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "wasm-request-ok");
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn global_response_middleware_decorates_response() {
         let config = load_test_config("global_response_middleware.toml");
         let server_addr = config.server.address.clone();

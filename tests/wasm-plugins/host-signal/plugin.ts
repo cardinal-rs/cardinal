@@ -1,5 +1,5 @@
 @external("env", "host_signal")
-declare function host_signal(value: i32): i32;
+declare function host_signal(ptr: i32, len: i32): i32;
 
 @external("env", "set_header")
 declare function host_set_header(
@@ -25,7 +25,15 @@ function writeHeader(name: string, value: string): void {
 }
 
 export function handle(_ptr: i32, _len: i32): i32 {
-  host_signal(7);
+  const buf = new ArrayBuffer(4);
+  const ptr = changetype<i32>(buf);
+  const len = buf.byteLength;
+
+  host_signal(ptr, len);
+
+  const bytes = Uint8Array.wrap(buf);
+  const first = bytes[0].toString();
+  writeHeader("x-host-memory", first);
   writeHeader("x-host-signal", "called");
   host_set_status(200);
   return 1;

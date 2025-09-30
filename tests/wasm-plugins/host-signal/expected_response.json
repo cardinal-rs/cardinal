@@ -2,6 +2,7 @@
   "should_continue": true,
   "execution_type": "Outbound",
   "resp_headers": {
+    "x-host-memory": "170",
     "x-host-signal": "called"
   },
   "status": 200

@@ -73,7 +73,7 @@ pub fn make_imports(
     if let Some(host_map) = host_imports {
         if let Some(extra_env) = host_map.get("env") {
             for (name, builder) in extra_env {
-                let function = builder(store);
+                let function = builder(store, env);
                 ns.insert(name.as_str(), function);
             }
         }
@@ -89,7 +89,7 @@ pub fn make_imports(
 
             let mut exports = Exports::new();
             for (name, builder) in functions {
-                let function = builder(store);
+                let function = builder(store, env);
                 exports.insert(name.as_str(), function);
             }
 

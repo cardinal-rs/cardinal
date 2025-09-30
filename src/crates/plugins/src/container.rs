@@ -10,6 +10,7 @@ use cardinal_wasm_plugins::plugin::WasmPlugin;
 use cardinal_wasm_plugins::runner::{
     ExecutionType, HostFunctionBuilder, HostFunctionMap, WasmRunner,
 };
+use cardinal_wasm_plugins::wasmer::{Function, FunctionEnv, Store};
 use cardinal_wasm_plugins::{ExecutionContext, ExecutionRequest, ExecutionResponse};
 use pingora::prelude::Session;
 use std::collections::HashMap;
@@ -69,10 +70,7 @@ impl PluginContainer {
         name: impl Into<String>,
         builder: F,
     ) where
-        F: Fn(&mut cardinal_wasm_plugins::wasmer::Store) -> cardinal_wasm_plugins::wasmer::Function
-            + Send
-            + Sync
-            + 'static,
+        F: Fn(&mut Store, &FunctionEnv<ExecutionContext>) -> Function + Send + Sync + 'static,
     {
         let ns = namespace.into();
         let host_entry = self.host_imports.entry(ns).or_default();

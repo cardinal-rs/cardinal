@@ -15,9 +15,10 @@ mod tests {
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
     use cardinal_proxy::CardinalContextProvider;
     use cardinal_wasm_plugins::plugin::WasmPlugin;
+    use cardinal_wasm_plugins::wasmer::AsStoreRef;
     use pingora::proxy::Session;
     use std::path::Path;
-    use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
     use std::thread::JoinHandle;
     use std::time::Duration;
@@ -403,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn wasm_host_import_invokes_custom_function() {
-        use cardinal_wasm_plugins::wasmer::{Function, Store};
+        use cardinal_wasm_plugins::wasmer::{Function, FunctionEnvMut, Store};
 
         let config = load_test_config("wasm_host_import.toml");
         let server_addr = config.server.address.clone();
@@ -437,12 +438,39 @@ mod tests {
                     let mut container = PluginContainer::new();
 
                     let host_signal_for_fn = host_signal_for_factory.clone();
-                    container.add_host_function("env", "host_signal", move |store| {
+                    container.add_host_function("env", "host_signal", move |store, env| {
                         let signal = host_signal_for_fn.clone();
-                        Function::new_typed(store, move |value: i32| -> i32 {
-                            signal.store(value, Ordering::SeqCst);
-                            0
-                        })
+                        Function::new_typed_with_env(
+                            store,
+                            env,
+                            move |mut ctx: FunctionEnvMut<
+                                cardinal_wasm_plugins::ExecutionContext,
+                            >,
+                                  ptr: i32,
+                                  len: i32|
+                                  -> i32 {
+                                let len = len.max(0);
+                                signal.store(len, Ordering::SeqCst);
+
+                                if let Some(outbound) = ctx.data_mut().as_outbound_mut() {
+                                    outbound
+                                        .resp_headers
+                                        .insert("x-env-signal".into(), "from-host".into());
+                                }
+
+                                if let Some(memory) = ctx.data().memory() {
+                                    let store_ref = ctx.as_store_ref();
+                                    let view = memory.view(&store_ref);
+                                    let sentinel = [0xAA, 0xBB, 0xCC, 0xDD];
+                                    let len = len.min(sentinel.len() as i32) as usize;
+                                    if len > 0 {
+                                        let _ = view.write(ptr as u64, &sentinel[..len]);
+                                    }
+                                }
+
+                                0
+                            },
+                        )
                     });
                     container
                         .add_plugin("host_plugin".to_string(), PluginHandler::Wasm(plugin_arc));
@@ -464,13 +492,140 @@ mod tests {
         assert_eq!(body, "host-import-ok");
 
         assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
-        assert_eq!(host_signal_value.load(Ordering::SeqCst), 7);
+        assert_eq!(host_signal_value.load(Ordering::SeqCst), 4);
         assert_eq!(
             response
                 .headers()
                 .get("x-host-signal")
                 .and_then(|v| v.to_str().ok()),
             Some("called")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("x-host-memory")
+                .and_then(|v| v.to_str().ok()),
+            Some("170")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("x-env-signal")
+                .and_then(|v| v.to_str().ok()),
+            Some("from-host")
+        );
+    }
+
+    #[tokio::test]
+    async fn wasm_host_import_can_mutate_env_memory() {
+        use cardinal_wasm_plugins::wasmer::{Function, FunctionEnvMut, Store};
+
+        let config = load_test_config("wasm_host_import.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "host");
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            backend_addr,
+            vec![Route::new(Method::Get, "/post", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("host-import-env");
+                let _ = request.respond(response).unwrap();
+            })],
+        );
+
+        let host_signal_value = Arc::new(AtomicI32::new(0));
+        let env_touched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let host_signal_for_factory = host_signal_value.clone();
+        let env_touched_factory = env_touched.clone();
+        let host_plugin_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/wasm-plugins/host-signal/plugin.wasm");
+
+        let cardinal = Cardinal::builder(config)
+            .register_provider_with_factory::<PluginContainer, _>(
+                ProviderScope::Singleton,
+                move |_ctx| {
+                    let wasm_plugin = WasmPlugin::from_path(&host_plugin_path).map_err(|e| {
+                        CardinalError::Other(format!("Failed to load host plugin: {}", e))
+                    })?;
+
+                    let plugin_arc = Arc::new(wasm_plugin);
+                    let mut container = PluginContainer::new();
+
+                    let host_signal_for_fn = host_signal_for_factory.clone();
+                    let env_touched_for_fn = env_touched_factory.clone();
+                    container.add_host_function("env", "host_signal", move |store, env| {
+                        let signal = host_signal_for_fn.clone();
+                        let touched = env_touched_for_fn.clone();
+                        Function::new_typed_with_env(
+                            store,
+                            env,
+                            move |mut ctx: FunctionEnvMut<
+                                cardinal_wasm_plugins::ExecutionContext,
+                            >,
+                                  ptr: i32,
+                                  len: i32|
+                                  -> i32 {
+                                let len = len.max(0);
+                                signal.store(len, Ordering::SeqCst);
+                                touched.store(true, Ordering::SeqCst);
+
+                                if let Some(outbound) = ctx.data_mut().as_outbound_mut() {
+                                    outbound
+                                        .resp_headers
+                                        .insert("x-env-signal".into(), "from-host".into());
+                                }
+
+                                if let Some(memory) = ctx.data().memory() {
+                                    let store = ctx.as_store_ref();
+                                    let view = memory.view(&store);
+                                    let sentinel = [0xAA, 0xBB, 0xCC, 0xDD];
+                                    let len = len.min(sentinel.len() as i32) as usize;
+                                    if len > 0 {
+                                        let _ = view.write(ptr as u64, &sentinel[..len]);
+                                    }
+                                }
+
+                                0
+                            },
+                        )
+                    });
+                    container.add_plugin(
+                        "host_plugin".to_string(),
+                        PluginHandler::Wasm(plugin_arc.clone()),
+                    );
+
+                    Ok(container)
+                },
+            )
+            .build();
+
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/host/post"))
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(host_signal_value.load(Ordering::SeqCst), 4);
+        assert!(env_touched.load(std::sync::atomic::Ordering::SeqCst));
+
+        // Ensure headers from both the plugin and host import are present
+        let headers = response.headers();
+        assert_eq!(
+            headers.get("x-host-signal").and_then(|v| v.to_str().ok()),
+            Some("called")
+        );
+        assert_eq!(
+            headers.get("x-host-memory").and_then(|v| v.to_str().ok()),
+            Some("170")
+        );
+        assert_eq!(
+            headers.get("x-env-signal").and_then(|v| v.to_str().ok()),
+            Some("from-host")
         );
     }
 

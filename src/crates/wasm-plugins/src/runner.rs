@@ -6,7 +6,7 @@ use cardinal_errors::CardinalError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasmer::TypedFunction;
-use wasmer::{Function, Store};
+use wasmer::{Function, FunctionEnv, Store};
 
 #[derive(Debug, Copy, Clone)]
 pub enum ExecutionType {
@@ -19,7 +19,8 @@ pub struct ExecutionResult {
     pub execution_context: ExecutionContext,
 }
 
-pub type HostFunctionBuilder = Arc<dyn Fn(&mut Store) -> Function + Send + Sync>;
+pub type HostFunctionBuilder =
+    Arc<dyn Fn(&mut Store, &FunctionEnv<ExecutionContext>) -> Function + Send + Sync>;
 pub type HostFunctionMap = HashMap<String, Vec<(String, HostFunctionBuilder)>>;
 
 pub struct WasmRunner<'a> {

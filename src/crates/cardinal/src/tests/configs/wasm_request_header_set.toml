@@ -1,5 +1,5 @@
 [server]
-address = "127.0.0.1:1821"
+address = "127.0.0.1:1824"
 force_path_parameter = true
 log_upstream_response = false
 global_request_middleware = ["block"]
@@ -7,7 +7,7 @@ global_response_middleware = []
 
 [destinations.posts]
 name = "posts"
-url = "127.0.0.1:2921"
+url = "127.0.0.1:2924"
 routes = []
 middleware = []
 

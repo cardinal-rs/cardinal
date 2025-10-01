@@ -1,7 +1,7 @@
 use crate::container::PluginContainer;
+use crate::request_context::RequestContext;
 use async_trait::async_trait;
 use cardinal_base::context::CardinalContext;
-use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::CardinalError;
 use pingora::http::ResponseHeader;
 use pingora::proxy::Session;
@@ -19,7 +19,7 @@ pub trait RequestMiddleware: Send + Sync + 'static {
     async fn on_request(
         &self,
         session: &mut Session,
-        backend: Arc<DestinationWrapper>,
+        req_ctx: &mut RequestContext,
         cardinal: Arc<CardinalContext>,
     ) -> Result<MiddlewareResult, CardinalError>;
 }
@@ -29,7 +29,7 @@ pub trait ResponseMiddleware: Send + Sync + 'static {
     async fn on_response(
         &self,
         session: &mut Session,
-        backend: Arc<DestinationWrapper>,
+        req_ctx: &mut RequestContext,
         response: &mut ResponseHeader,
         cardinal: Arc<CardinalContext>,
     );
@@ -68,14 +68,14 @@ impl PluginRunner {
     pub async fn run_request_filters(
         &self,
         session: &mut Session,
-        backend: Arc<DestinationWrapper>,
+        req_ctx: &mut RequestContext,
     ) -> Result<MiddlewareResult, CardinalError> {
         let filter_container = self.context.get::<PluginContainer>().await?;
         let mut resp_headers = HashMap::new();
 
         for filter in self.global_request_filters() {
             let run = filter_container
-                .run_request_filter(filter, session, backend.clone(), self.context.clone())
+                .run_request_filter(filter, session, req_ctx, self.context.clone())
                 .await?;
 
             match run {
@@ -86,15 +86,11 @@ impl PluginRunner {
             }
         }
 
+        let backend = req_ctx.backend.clone(); // Cheap clone
         let inbound_middleware = backend.get_inbound_middleware();
         for middleware in inbound_middleware {
             let run = filter_container
-                .run_request_filter(
-                    &middleware.name,
-                    session,
-                    backend.clone(),
-                    self.context.clone(),
-                )
+                .run_request_filter(&middleware.name, session, req_ctx, self.context.clone())
                 .await?;
 
             match run {
@@ -111,23 +107,18 @@ impl PluginRunner {
     pub async fn run_response_filters(
         &self,
         session: &mut Session,
-        backend: Arc<DestinationWrapper>,
+        req_ctx: &mut RequestContext,
         response: &mut ResponseHeader,
     ) {
         let filter_container = self.context.get::<PluginContainer>().await.unwrap();
 
         for filter in self.global_response_filters() {
             filter_container
-                .run_response_filter(
-                    filter,
-                    session,
-                    backend.clone(),
-                    response,
-                    self.context.clone(),
-                )
+                .run_response_filter(filter, session, req_ctx, response, self.context.clone())
                 .await;
         }
 
+        let backend = req_ctx.backend.clone(); // Cheap clone
         let outbound_middleware = backend.get_outbound_middleware();
         for middleware in outbound_middleware {
             let middleware_name = &middleware.name;
@@ -135,7 +126,7 @@ impl PluginRunner {
                 .run_response_filter(
                     middleware_name,
                     session,
-                    backend.clone(),
+                    req_ctx,
                     response,
                     self.context.clone(),
                 )

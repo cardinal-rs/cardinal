@@ -4,13 +4,13 @@ use crate::utils::requests::{
     compose_upstream_url, parse_origin, rewrite_request_path, set_upstream_host_headers,
 };
 use cardinal_base::context::CardinalContext;
-use cardinal_base::destinations::container::{DestinationContainer, DestinationWrapper};
-use cardinal_plugins::runner::{MiddlewareResult, PluginRunner};
+use cardinal_base::destinations::container::DestinationContainer;
+use cardinal_plugins::request_context::RequestContext;
+use cardinal_plugins::runner::MiddlewareResult;
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora::protocols::Digest;
 use pingora::upstreams::peer::Peer;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
@@ -125,12 +125,11 @@ impl ProxyHttp for CardinalProxy {
 
         rewrite_request_path(session.req_header_mut(), &destination_name, force_path);
 
-        let mut request_state = RequestContext::new(context.clone());
-        request_state.backend = Some(backend.clone());
+        let mut request_state = RequestContext::new(context.clone(), backend);
+        let plugin_runner = request_state.plugin_runner.clone();
 
-        let run_filters = request_state
-            .runner
-            .run_request_filters(session, backend)
+        let run_filters = plugin_runner
+            .run_request_filters(session, &mut request_state)
             .await;
 
         let res = match run_filters {
@@ -160,34 +159,30 @@ impl ProxyHttp for CardinalProxy {
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
         if let Some(state) = ctx.as_ref() {
-            if let Some(backend) = state.backend.as_ref() {
-                // Determine origin parts for TLS and SNI
-                let (host, port, is_tls) = parse_origin(&backend.destination.url)
-                    .map_err(|_| Error::new_str("Origin could not be parsed "))?;
-                let hostport = format!("{host}:{port}");
+            // Determine origin parts for TLS and SNI
+            let (host, port, is_tls) = parse_origin(&state.backend.destination.url)
+                .map_err(|_| Error::new_str("Origin could not be parsed "))?;
+            let hostport = format!("{host}:{port}");
 
-                // Compose full upstream URL for logging with normalized scheme
-                let path_and_query = _session
-                    .req_header()
-                    .uri
-                    .path_and_query()
-                    .map(|pq| pq.as_str())
-                    .unwrap_or("/");
-                let upstream_url = compose_upstream_url(is_tls, &host, port, path_and_query);
+            // Compose full upstream URL for logging with normalized scheme
+            let path_and_query = _session
+                .req_header()
+                .uri
+                .path_and_query()
+                .map(|pq| pq.as_str())
+                .unwrap_or("/");
+            let upstream_url = compose_upstream_url(is_tls, &host, port, path_and_query);
 
-                info!(%upstream_url, backend_id = %backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
-                debug!(upstream_origin = %hostport, "Connecting to upstream origin");
+            info!(%upstream_url, backend_id = %state.backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
+            debug!(upstream_origin = %hostport, "Connecting to upstream origin");
 
-                let mut peer = HttpPeer::new(&hostport, is_tls, host);
-                if let Some(opts) = peer.get_mut_peer_options() {
-                    // Allow both HTTP/1.1 and HTTP/2 so plain HTTP backends keep working.
-                    opts.set_http_version(2, 1);
-                }
-                let peer = Box::new(peer);
-                Ok(peer)
-            } else {
-                Err(Error::new(ErrorType::InternalError))
+            let mut peer = HttpPeer::new(&hostport, is_tls, host);
+            if let Some(opts) = peer.get_mut_peer_options() {
+                // Allow both HTTP/1.1 and HTTP/2 so plain HTTP backends keep working.
+                opts.set_http_version(2, 1);
             }
+            let peer = Box::new(peer);
+            Ok(peer)
         } else {
             Err(Error::new(ErrorType::InternalError))
         }
@@ -205,8 +200,7 @@ impl ProxyHttp for CardinalProxy {
     ) -> Result<()> {
         let backend_id = ctx
             .as_ref()
-            .and_then(|state| state.backend.as_ref())
-            .map(|b| b.destination.name.as_str())
+            .map(|b| b.backend.destination.name.as_str())
             .unwrap_or("<unknown>");
         info!(backend_id, reused, peer = %peer, "Connected to upstream");
         Ok(())
@@ -225,14 +219,13 @@ impl ProxyHttp for CardinalProxy {
                 }
             }
 
-            if let Some(backend) = state.backend.clone() {
-                state
-                    .runner
-                    .run_response_filters(session, backend, upstream_response)
-                    .await;
-            }
+            let runner = state.plugin_runner.clone();
 
-            if !state.context.config.server.log_upstream_response {
+            runner
+                .run_response_filters(session, state, upstream_response)
+                .await;
+
+            if !state.cardinal_context.config.server.log_upstream_response {
                 return Ok(());
             }
 
@@ -242,11 +235,7 @@ impl ProxyHttp for CardinalProxy {
                 .get("location")
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
-            let backend_id = state
-                .backend
-                .as_ref()
-                .map(|b| b.destination.name.as_str())
-                .unwrap_or("<unknown>");
+            let backend_id = &state.backend.destination.name;
             if let Some(loc) = location {
                 info!(backend_id, status, location = %loc, "Upstream responded");
             } else {
@@ -255,24 +244,5 @@ impl ProxyHttp for CardinalProxy {
         }
 
         Ok(())
-    }
-}
-
-pub struct RequestContext {
-    pub context: Arc<CardinalContext>,
-    pub backend: Option<Arc<DestinationWrapper>>,
-    pub runner: PluginRunner,
-    pub response_headers: Option<HashMap<String, String>>,
-}
-
-impl RequestContext {
-    fn new(context: Arc<CardinalContext>) -> Self {
-        let runner = PluginRunner::new(context.clone());
-        Self {
-            context,
-            backend: None,
-            runner,
-            response_headers: None,
-        }
     }
 }

@@ -1,8 +1,8 @@
 use crate::builtin::restricted_route_middleware::RestrictedRouteMiddleware;
+use crate::request_context::RequestContext;
 use crate::runner::{DynRequestMiddleware, DynResponseMiddleware, MiddlewareResult};
 use crate::utils::parse_query_string_multi;
 use cardinal_base::context::CardinalContext;
-use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_base::provider::Provider;
 use cardinal_config::Plugin;
 use cardinal_errors::CardinalError;
@@ -99,7 +99,7 @@ impl PluginContainer {
         &self,
         name: &str,
         session: &mut Session,
-        backend: Arc<DestinationWrapper>,
+        req_ctx: &mut RequestContext,
         ctx: Arc<CardinalContext>,
     ) -> Result<MiddlewareResult, CardinalError> {
         let plugin = self
@@ -110,7 +110,7 @@ impl PluginContainer {
         match plugin.as_ref() {
             PluginHandler::Builtin(builtin) => match builtin {
                 PluginBuiltInType::Inbound(filter) => {
-                    filter.on_request(session, backend, ctx).await
+                    filter.on_request(session, req_ctx, ctx).await
                 }
                 PluginBuiltInType::Outbound(_) => Err(CardinalError::Other(format!(
                     "The filter {name} is not a request filter"
@@ -176,7 +176,7 @@ impl PluginContainer {
         &self,
         name: &str,
         session: &mut Session,
-        backend: Arc<DestinationWrapper>,
+        req_ctx: &mut RequestContext,
         response: &mut pingora::http::ResponseHeader,
         ctx: Arc<CardinalContext>,
     ) {
@@ -192,7 +192,7 @@ impl PluginContainer {
                         error!("The filter {name} is not a response filter");
                     }
                     PluginBuiltInType::Outbound(filter) => {
-                        filter.on_response(session, backend, response, ctx).await
+                        filter.on_response(session, req_ctx, response, ctx).await
                     }
                 },
                 PluginHandler::Wasm(wasm) => {

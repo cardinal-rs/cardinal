@@ -12,6 +12,7 @@ mod tests {
     use cardinal_errors::CardinalError;
     use cardinal_plugins::container::{PluginBuiltInType, PluginContainer, PluginHandler};
     use cardinal_plugins::headers::CARDINAL_PARAMS_HEADER_BASE;
+    use cardinal_plugins::request_context::RequestContext;
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
     use cardinal_proxy::CardinalContextProvider;
     use cardinal_wasm_plugins::plugin::WasmPlugin;
@@ -1124,7 +1125,7 @@ mod tests {
         async fn on_request(
             &self,
             _session: &mut Session,
-            _backend: Arc<DestinationWrapper>,
+            _backend: &mut RequestContext,
             _cardinal: Arc<CardinalContext>,
         ) -> Result<MiddlewareResult, CardinalError> {
             self.hits.fetch_add(1, Ordering::SeqCst);
@@ -1143,7 +1144,7 @@ mod tests {
         async fn on_response(
             &self,
             _session: &mut Session,
-            _backend: Arc<DestinationWrapper>,
+            _backend: &mut RequestContext,
             response: &mut pingora::http::ResponseHeader,
             _cardinal: Arc<CardinalContext>,
         ) {
@@ -1161,7 +1162,7 @@ mod tests {
         async fn on_request(
             &self,
             session: &mut Session,
-            _backend: Arc<DestinationWrapper>,
+            _backend: &mut RequestContext,
             _cardinal: Arc<CardinalContext>,
         ) -> Result<MiddlewareResult, CardinalError> {
             self.hits.fetch_add(1, Ordering::SeqCst);
@@ -1180,7 +1181,7 @@ mod tests {
         async fn on_request(
             &self,
             _session: &mut Session,
-            _backend: Arc<DestinationWrapper>,
+            _backend: &mut RequestContext,
             _cardinal: Arc<CardinalContext>,
         ) -> Result<MiddlewareResult, CardinalError> {
             self.hits.fetch_add(1, Ordering::SeqCst);

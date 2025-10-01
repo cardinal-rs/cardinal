@@ -299,9 +299,7 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         let headers = response.headers();
-        let decision = headers
-            .get("x-decision")
-            .and_then(|v| v.to_str().ok());
+        let decision = headers.get("x-decision").and_then(|v| v.to_str().ok());
         assert_eq!(decision, Some("allowed"));
 
         let body = response.body_mut().read_to_string().unwrap();

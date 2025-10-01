@@ -12,10 +12,10 @@ categories = ["network-programming", "development-tools"]
 
 [dependencies]
 pingora = { workspace = true, features = ["openssl"] }
-cardinal-base = { path = "../base", version = "0.2.23" }
-cardinal-errors = { path = "../errors", version = "0.2.23" }
-cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.23" }
-cardinal-config = { path = "../config", version = "0.2.23" }
+cardinal-base = { path = "../base", version = "0.2.24" }
+cardinal-errors = { path = "../errors", version = "0.2.24" }
+cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.24" }
+cardinal-config = { path = "../config", version = "0.2.24" }
 async-trait.workspace = true
 tracing.workspace = true
 form_urlencoded = "1.2.2"

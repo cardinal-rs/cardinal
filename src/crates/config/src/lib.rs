@@ -81,8 +81,20 @@ impl Serialize for Plugin {
         S: Serializer,
     {
         match self {
-            Plugin::Builtin(builtin) => BuiltinPlugin::serialize(builtin, serializer),
-            Plugin::Wasm(wasm) => WasmPluginConfig::serialize(wasm, serializer),
+            Plugin::Builtin(builtin) => {
+                #[derive(Serialize)]
+                struct Wrapper<'a> {
+                    builtin: &'a BuiltinPlugin,
+                }
+                Wrapper { builtin }.serialize(serializer)
+            }
+            Plugin::Wasm(wasm) => {
+                #[derive(Serialize)]
+                struct Wrapper<'a> {
+                    wasm: &'a WasmPluginConfig,
+                }
+                Wrapper { wasm }.serialize(serializer)
+            }
         }
     }
 }
@@ -199,4 +211,87 @@ pub fn validate_config(config: &CardinalConfig) -> Result<(), ConfigError> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, to_value};
+
+    #[test]
+    fn serialize_builtin_plugin() {
+        let plugin = Plugin::Builtin(BuiltinPlugin {
+            name: "Logger".to_string(),
+        });
+
+        let val = to_value(&plugin).unwrap();
+
+        let expected = json!({
+            "builtin": {
+                "name": "Logger"
+            }
+        });
+
+        assert_eq!(val, expected);
+    }
+
+    #[test]
+    fn serialize_wasm_plugin() {
+        let wasm_cfg = WasmPluginConfig {
+            name: "RateLimit".to_string(),
+            path: "plugins/ratelimit.wasm".to_string(),
+            memory_name: None,
+            handle_name: None,
+        };
+        let plugin = Plugin::Wasm(wasm_cfg);
+
+        let val = to_value(&plugin).unwrap();
+
+        let expected = json!({
+            "wasm": {
+                "name": "RateLimit",
+                "path": "plugins/ratelimit.wasm",
+                "memory_name": null,
+                "handle_name": null
+            }
+        });
+
+        assert_eq!(val, expected);
+    }
+
+    #[test]
+    fn toml_builtin_plugin() {
+        let plugin = Plugin::Builtin(BuiltinPlugin {
+            name: "Logger".to_string(),
+        });
+
+        let toml_str = toml::to_string(&plugin).unwrap();
+
+        let expected = r#"[builtin]
+name = "Logger"
+"#;
+
+        assert_eq!(toml_str, expected);
+    }
+
+    #[test]
+    fn toml_wasm_plugin() {
+        let wasm_cfg = WasmPluginConfig {
+            name: "RateLimit".to_string(),
+            path: "plugins/ratelimit.wasm".to_string(),
+            memory_name: None,
+            handle_name: None,
+        };
+        let plugin = Plugin::Wasm(wasm_cfg);
+
+        let toml_str = toml::to_string(&plugin).unwrap();
+
+        // None fields are skipped
+        let expected = r#"[wasm]
+name = "RateLimit"
+path = "plugins/ratelimit.wasm"
+"#;
+
+        assert_eq!(toml_str, expected);
+    }
 }

@@ -169,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_request_middleware_executes_before_backend() {
-        let config = load_test_config("global_request_middleware.toml");
+        let config = load_test_config("global_request_middleware_test.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
         let backend_hits = Arc::new(AtomicUsize::new(0));
@@ -214,7 +214,7 @@ mod tests {
 
     #[tokio::test]
     async fn request_middleware_headers_are_applied_to_response() {
-        let mut config = load_test_config("global_request_middleware.toml");
+        let mut config = load_test_config("wasm_request_status_short_circuit.toml");
         let server_addr = config.server.address.clone();
         let backend_addr = destination_url(&config, "posts");
 

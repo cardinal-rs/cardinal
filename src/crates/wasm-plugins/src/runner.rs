@@ -1,6 +1,6 @@
 use crate::instance::WasmInstance;
 use crate::plugin::WasmPlugin;
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::{ExecutionContext, SharedExecutionContext};
 use bytes::Bytes;
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
@@ -16,7 +16,7 @@ pub struct ExecutionResult {
 }
 
 pub type HostFunctionBuilder =
-    Arc<dyn Fn(&mut Store, &FunctionEnv<ExecutionContextCell>) -> Function + Send + Sync>;
+    Arc<dyn Fn(&mut Store, &FunctionEnv<SharedExecutionContext>) -> Function + Send + Sync>;
 pub type HostFunctionMap = HashMap<String, Vec<(String, HostFunctionBuilder)>>;
 
 pub struct WasmRunner<'a> {
@@ -32,9 +32,13 @@ impl<'a> WasmRunner<'a> {
         }
     }
 
-    pub fn run(&self, exec_ctx: ExecutionContextCell) -> Result<ExecutionResult, CardinalError> {
+    pub fn run(
+        &self,
+        shared_ctx: SharedExecutionContext,
+    ) -> Result<ExecutionResult, CardinalError> {
         // 1) Instantiate a fresh instance per request
-        let mut instance = WasmInstance::from_plugin(self.plugin, self.host_imports, exec_ctx)?;
+        let mut instance =
+            WasmInstance::from_plugin(self.plugin, self.host_imports, shared_ctx.clone())?;
 
         // I don't think we need this anymore
         // {
@@ -67,7 +71,7 @@ impl<'a> WasmRunner<'a> {
 
         let body_opt: Option<Bytes> = {
             let ctx_ref = instance.env.as_ref(&instance.store);
-            ctx_ref.inner.read().body().clone()
+            ctx_ref.read().body().clone()
         };
 
         let (ptr, len) = if let Some(body) = body_opt.filter(|b| !b.is_empty()) {
@@ -99,10 +103,7 @@ impl<'a> WasmRunner<'a> {
             )))
         })?;
 
-        let exec_ctx_clone = {
-            let exec_ctx = instance.env.as_ref(&instance.store).inner.read();
-            exec_ctx.clone()
-        };
+        let exec_ctx_clone = shared_ctx.read().clone();
 
         Ok(ExecutionResult {
             should_continue: decision == 1,

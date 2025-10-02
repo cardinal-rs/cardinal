@@ -1,13 +1,13 @@
 use crate::utils::{read_bytes, with_mem_view};
-use crate::ExecutionContextCell;
+use crate::SharedExecutionContext;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
-pub fn abort(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {
+pub fn abort(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
     let env = env.clone();
     Function::new_typed_with_env(
         store,
         &env,
-        move |ctx: FunctionEnvMut<ExecutionContextCell>,
+        move |ctx: FunctionEnvMut<SharedExecutionContext>,
               msg_ptr: i32,
               file_ptr: i32,
               line: i32,

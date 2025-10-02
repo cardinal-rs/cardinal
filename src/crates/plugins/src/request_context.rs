@@ -1,7 +1,7 @@
 use crate::runner::PluginRunner;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationWrapper;
-use cardinal_wasm_plugins::ExecutionContext;
+use cardinal_wasm_plugins::{ExecutionContext, SharedExecutionContext};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ pub struct RequestContext {
     pub backend: Arc<DestinationWrapper>,
     pub plugin_runner: Arc<PluginRunner>,
     pub response_headers: Option<HashMap<String, String>>,
-    pub plugin_exec_context: Arc<RwLock<ExecutionContext>>,
+    pub shared_ctx: SharedExecutionContext,
 }
 
 impl RequestContext {
@@ -26,11 +26,15 @@ impl RequestContext {
             backend,
             plugin_runner: Arc::new(runner),
             response_headers: None,
-            plugin_exec_context: Arc::new(RwLock::new(execution_context)),
+            shared_ctx: Arc::new(RwLock::new(execution_context)),
         }
     }
 
     pub fn persistent_vars(&self) -> Arc<RwLock<HashMap<String, String>>> {
-        self.plugin_exec_context.read().persistent_vars().clone()
+        self.shared_ctx.read().persistent_vars().clone()
+    }
+
+    pub fn shared_context(&self) -> SharedExecutionContext {
+        self.shared_ctx.clone()
     }
 }

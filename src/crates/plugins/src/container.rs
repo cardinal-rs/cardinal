@@ -8,7 +8,7 @@ use cardinal_errors::CardinalError;
 use cardinal_wasm_plugins::plugin::WasmPlugin;
 use cardinal_wasm_plugins::runner::{HostFunctionBuilder, HostFunctionMap, WasmRunner};
 use cardinal_wasm_plugins::wasmer::{Function, FunctionEnv, Store};
-use cardinal_wasm_plugins::{ExecutionContextCell, ResponseState};
+use cardinal_wasm_plugins::{ResponseState, SharedExecutionContext};
 use pingora::http::ResponseHeader;
 use pingora::prelude::Session;
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ impl PluginContainer {
         name: impl Into<String>,
         builder: F,
     ) where
-        F: Fn(&mut Store, &FunctionEnv<ExecutionContextCell>) -> Function + Send + Sync + 'static,
+        F: Fn(&mut Store, &FunctionEnv<SharedExecutionContext>) -> Function + Send + Sync + 'static,
     {
         let ns = namespace.into();
         let host_entry = self.host_imports.entry(ns).or_default();
@@ -118,9 +118,7 @@ impl PluginContainer {
             PluginHandler::Wasm(wasm) => {
                 let runner = WasmRunner::new(wasm, self.host_imports());
 
-                let mut exec = runner.run(ExecutionContextCell::new_from_arc(
-                    req_ctx.plugin_exec_context.clone(),
-                ))?;
+                let exec = runner.run(req_ctx.shared_context())?;
 
                 if !exec.execution_context.req_headers().is_empty() {
                     for (key, val) in exec.execution_context.req_headers() {
@@ -128,27 +126,16 @@ impl PluginContainer {
                     }
                 }
 
-                if exec
-                    .execution_context
-                    .response()
-                    .status_override()
-                    .is_some()
-                {
-                    exec.should_continue = false;
-                }
-
-                if exec.should_continue {
-                    Ok(MiddlewareResult::Continue(
-                        exec.execution_context.response().headers().clone(),
-                    ))
-                } else {
-                    let response_state = exec.execution_context.response();
+                let response_state = exec.execution_context.response();
+                if !exec.should_continue || response_state.status_override().is_some() {
                     let header_response = Self::build_response_header(response_state);
                     let _ = session
                         .write_response_header(Box::new(header_response), false)
                         .await;
                     let _ = session.respond_error(response_state.status()).await;
                     Ok(MiddlewareResult::Responded)
+                } else {
+                    Ok(MiddlewareResult::Continue(response_state.headers().clone()))
                 }
             }
         }
@@ -180,9 +167,7 @@ impl PluginContainer {
                 PluginHandler::Wasm(wasm) => {
                     let runner = WasmRunner::new(wasm, self.host_imports());
 
-                    let exec = runner.run(ExecutionContextCell::new_from_arc(
-                        req_ctx.plugin_exec_context.clone(),
-                    ));
+                    let exec = runner.run(req_ctx.shared_context());
 
                     match &exec {
                         Ok(ex) => {

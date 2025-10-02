@@ -183,6 +183,8 @@ impl ExecutionContext {
     }
 }
 
+pub type SharedExecutionContext = Arc<RwLock<ExecutionContext>>;
+
 fn normalize_headers(headers: HashMap<String, String>) -> HashMap<String, String> {
     headers
         .into_iter()
@@ -195,22 +197,6 @@ fn normalize_query(query: HashMap<String, Vec<String>>) -> HashMap<String, Vec<S
         .into_iter()
         .map(|(k, v)| (k.to_ascii_lowercase(), v))
         .collect()
-}
-
-pub struct ExecutionContextCell {
-    pub inner: Arc<RwLock<ExecutionContext>>,
-}
-
-impl ExecutionContextCell {
-    pub fn new(ctx: ExecutionContext) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(ctx)),
-        }
-    }
-
-    pub fn new_from_arc(ctx: Arc<RwLock<ExecutionContext>>) -> Self {
-        Self { inner: ctx }
-    }
 }
 
 #[cfg(test)]
@@ -274,8 +260,9 @@ mod tests {
         let exec_ctx = execution_context_from_value(&incoming, expected.execution_type, name);
 
         let runner = WasmRunner::new(&wasm_plugin, None);
+        let shared_ctx = Arc::new(RwLock::new(exec_ctx));
         let result = runner
-            .run(ExecutionContextCell::new(exec_ctx))
+            .run(shared_ctx)
             .unwrap_or_else(|e| panic!("plugin execution failed for {:?}: {}", wasm_path, e));
 
         assert_eq!(

@@ -1,6 +1,6 @@
 use crate::runner::HostFunctionMap;
 use crate::utils::{read_bytes, with_mem_view, write_bytes};
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::{ExecutionContext, SharedExecutionContext};
 use std::collections::HashMap;
 use wasmer::{Exports, FunctionEnv, FunctionEnvMut, Imports, Store};
 
@@ -15,7 +15,7 @@ mod set_status;
 /// Read key from guest, optionally normalize, look it up using `get_map`,
 /// write value into guest up to `out_cap`, return written bytes or -1.
 pub fn read_key_lookup_and_write(
-    ctx: &FunctionEnvMut<ExecutionContextCell>,
+    ctx: &FunctionEnvMut<SharedExecutionContext>,
     key_ptr: i32,
     key_len: i32,
     out_ptr: i32,
@@ -23,7 +23,7 @@ pub fn read_key_lookup_and_write(
     normalize_key: bool,
     get_map: impl Fn(&ExecutionContext) -> &HashMap<String, String>,
 ) -> i32 {
-    let inner = ctx.data().inner.read();
+    let inner = ctx.data().read();
     read_key_lookup_and_write_ref(
         ctx,
         key_ptr,
@@ -36,7 +36,7 @@ pub fn read_key_lookup_and_write(
 }
 
 pub fn read_key_lookup_and_write_ref(
-    ctx: &FunctionEnvMut<ExecutionContextCell>,
+    ctx: &FunctionEnvMut<SharedExecutionContext>,
     key_ptr: i32,
     key_len: i32,
     out_ptr: i32,
@@ -73,7 +73,7 @@ pub fn read_key_lookup_and_write_ref(
 
 pub fn make_imports(
     store: &mut Store,
-    env: &FunctionEnv<ExecutionContextCell>,
+    env: &FunctionEnv<SharedExecutionContext>,
     host_imports: Option<&HostFunctionMap>,
 ) -> Imports {
     let mut imports = Imports::new();

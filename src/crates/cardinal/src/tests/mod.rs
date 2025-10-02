@@ -613,7 +613,7 @@ mod tests {
                             store,
                             env,
                             move |mut ctx: FunctionEnvMut<
-                                cardinal_wasm_plugins::ExecutionContextCell,
+                                cardinal_wasm_plugins::SharedExecutionContext,
                             >,
                                   ptr: i32,
                                   len: i32|
@@ -622,14 +622,14 @@ mod tests {
                                 signal.store(len, Ordering::SeqCst);
 
                                 {
-                                    let mut inner = ctx.data_mut().inner.write();
+                                    let mut inner = ctx.data_mut().write();
                                     inner
                                         .response_mut()
                                         .headers_mut()
                                         .insert("x-env-signal".into(), "from-host".into());
                                 }
 
-                                if let Some(memory) = ctx.data().inner.read().memory() {
+                                if let Some(memory) = ctx.data().read().memory() {
                                     let store_ref = ctx.as_store_ref();
                                     let view = memory.view(&store_ref);
                                     let sentinel = [0xAA, 0xBB, 0xCC, 0xDD];
@@ -733,7 +733,7 @@ mod tests {
                             store,
                             env,
                             move |mut ctx: FunctionEnvMut<
-                                cardinal_wasm_plugins::ExecutionContextCell,
+                                cardinal_wasm_plugins::SharedExecutionContext,
                             >,
                                   ptr: i32,
                                   len: i32|
@@ -743,7 +743,7 @@ mod tests {
                                 touched.store(true, Ordering::SeqCst);
 
                                 {
-                                    let mut inner = ctx.data_mut().inner.write();
+                                    let mut inner = ctx.data_mut().write();
 
                                     inner
                                         .response_mut()
@@ -751,7 +751,7 @@ mod tests {
                                         .insert("x-env-signal".into(), "from-host".into());
                                 }
 
-                                if let Some(memory) = ctx.data().inner.read().memory() {
+                                if let Some(memory) = ctx.data().read().memory() {
                                     let store = ctx.as_store_ref();
                                     let view = memory.view(&store);
                                     let sentinel = [0xAA, 0xBB, 0xCC, 0xDD];

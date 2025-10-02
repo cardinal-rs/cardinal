@@ -1,9 +1,9 @@
 use crate::utils::{read_bytes, with_mem_view};
-use crate::ExecutionContextCell;
+use crate::SharedExecutionContext;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn set_req_var_raw(
-    mut ctx: FunctionEnvMut<ExecutionContextCell>,
+    ctx: FunctionEnvMut<SharedExecutionContext>,
     name_ptr: i32,
     name_len: i32,
     val_ptr: i32,
@@ -23,10 +23,10 @@ fn set_req_var_raw(
         Err(_) => return,
     };
 
-    let inner = ctx.data_mut().inner.write();
+    let inner = ctx.data().write();
     inner.persistent_vars().write().insert(name, value);
 }
 
-pub fn set_req_var(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {
+pub fn set_req_var(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
     Function::new_typed_with_env(store, env, set_req_var_raw)
 }

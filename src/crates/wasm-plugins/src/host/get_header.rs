@@ -1,9 +1,9 @@
 use crate::host::read_key_lookup_and_write;
-use crate::ExecutionContextCell;
+use crate::SharedExecutionContext;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn get_header_raw(
-    ctx: FunctionEnvMut<ExecutionContextCell>,
+    ctx: FunctionEnvMut<SharedExecutionContext>,
     name_ptr: i32,
     name_len: i32,
     out_ptr: i32,
@@ -14,6 +14,6 @@ fn get_header_raw(
     })
 }
 
-pub fn get_header(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {
+pub fn get_header(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
     Function::new_typed_with_env(store, env, get_header_raw)
 }

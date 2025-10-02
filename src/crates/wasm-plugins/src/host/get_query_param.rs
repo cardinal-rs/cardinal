@@ -1,9 +1,9 @@
 use crate::utils::{read_bytes, with_mem_view, write_bytes};
-use crate::ExecutionContextCell;
+use crate::SharedExecutionContext;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn get_query_param_raw(
-    ctx: FunctionEnvMut<ExecutionContextCell>,
+    ctx: FunctionEnvMut<SharedExecutionContext>,
     key_ptr: i32,
     key_len: i32,
     out_ptr: i32,
@@ -19,7 +19,7 @@ fn get_query_param_raw(
         Err(_) => return -1,
     };
 
-    let inner = ctx.data().inner.read();
+    let inner = ctx.data().read();
 
     let values = match inner.query().get(&key) {
         Some(v) if !v.is_empty() => v,
@@ -37,6 +37,6 @@ fn get_query_param_raw(
     n as i32
 }
 
-pub fn get_query_param(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {
+pub fn get_query_param(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
     Function::new_typed_with_env(store, env, get_query_param_raw)
 }

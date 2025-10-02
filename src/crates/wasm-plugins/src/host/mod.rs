@@ -23,6 +23,27 @@ pub fn read_key_lookup_and_write(
     normalize_key: bool,
     get_map: impl Fn(&ExecutionContext) -> &HashMap<String, String>,
 ) -> i32 {
+    let inner = ctx.data().inner.read();
+    read_key_lookup_and_write_ref(
+        ctx,
+        key_ptr,
+        key_len,
+        out_ptr,
+        out_cap,
+        normalize_key,
+        get_map(&*inner),
+    )
+}
+
+pub fn read_key_lookup_and_write_ref(
+    ctx: &FunctionEnvMut<ExecutionContextCell>,
+    key_ptr: i32,
+    key_len: i32,
+    out_ptr: i32,
+    out_cap: i32,
+    normalize_key: bool,
+    map: &HashMap<String, String>,
+) -> i32 {
     let view = match with_mem_view(ctx) {
         Ok(v) => v,
         Err(_) => return -1,
@@ -40,8 +61,7 @@ pub fn read_key_lookup_and_write(
 
     let inner = ctx.data().inner.read();
 
-    let map_mutex = get_map(&*inner);
-    let Some(val) = map_mutex.get(&key) else {
+    let Some(val) = map.get(&key) else {
         return -1;
     };
     let bytes = val.as_bytes();

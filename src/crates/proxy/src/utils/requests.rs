@@ -4,8 +4,10 @@ use cardinal_errors::CardinalError;
 use cardinal_plugins::utils::parse_query_string_multi;
 use cardinal_wasm_plugins::{ExecutionContext, ResponseState};
 use http::Uri;
+use parking_lot::RwLock;
 use pingora::http::RequestHeader;
 use pingora::proxy::Session;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -130,6 +132,7 @@ pub(crate) fn execution_context_from_request(session: &Session) -> ExecutionCont
         query,
         None,
         ResponseState::with_default_status(200),
+        Arc::new(RwLock::new(HashMap::new())),
     )
 }
 

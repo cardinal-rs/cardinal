@@ -24,7 +24,7 @@ fn set_req_var_raw(
     };
 
     let mut inner = ctx.data_mut().inner.write();
-    inner.response_mut().headers_mut().insert(name, value);
+    inner.persistent_vars.write().insert(name, value);
 }
 
 pub fn set_req_var(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {

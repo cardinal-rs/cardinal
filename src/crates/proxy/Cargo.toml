@@ -21,3 +21,4 @@ cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.25" }
 async-trait.workspace = true
 bytes = "1.10.1"
 serde_json = "1.0.145"
+parking_lot.workspace = true

@@ -73,6 +73,7 @@ pub struct ExecutionContext {
     query: HashMap<String, Vec<String>>,
     body: Option<Bytes>,
     response: ResponseState,
+    persistent_vars: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl ExecutionContext {
@@ -92,6 +93,7 @@ impl ExecutionContext {
         query: HashMap<String, Vec<String>>,
         body: Option<Bytes>,
         response: ResponseState,
+        persistent_vars: Arc<RwLock<HashMap<String, String>>>,
     ) -> Self {
         Self {
             memory: None,
@@ -99,6 +101,7 @@ impl ExecutionContext {
             query: normalize_query(query),
             body,
             response,
+            persistent_vars,
         }
     }
 
@@ -316,7 +319,13 @@ mod tests {
             ScenarioKind::Response => response_state_from_value(value, 0),
         };
 
-        ExecutionContext::from_parts(req_headers, query, body, response_state)
+        ExecutionContext::from_parts(
+            req_headers,
+            query,
+            body,
+            response_state,
+            Arc::new(RwLock::new(HashMap::new())),
+        )
     }
 
     fn expected_response_from_value(value: &Value, scenario: &str) -> ExpectedResponse {

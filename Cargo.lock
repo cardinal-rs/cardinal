@@ -432,6 +432,7 @@ dependencies = [
  "cardinal-plugins",
  "cardinal-wasm-plugins",
  "http",
+ "parking_lot",
  "pingora",
  "serde_json",
  "tracing",

@@ -1,0 +1,15 @@
+[server]
+address = "127.0.0.1:1826"
+force_path_parameter = true
+log_upstream_response = false
+global_request_middleware = ["get-shared-only"]
+global_response_middleware = []
+
+[destinations.posts]
+name = "posts"
+url = "127.0.0.1:2926"
+routes = []
+middleware = []
+
+[[plugins]]
+wasm = { name = "get-shared-only", path = "../../../tests/wasm-plugins/request-shared-state/getter.wasm" }

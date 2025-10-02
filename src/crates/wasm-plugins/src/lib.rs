@@ -66,14 +66,46 @@ pub mod wasmer {
     pub use wasmer::*;
 }
 
+#[derive(Clone, Debug)]
+struct RequestData {
+    headers: Arc<HashMap<String, String>>,
+    query: Arc<HashMap<String, Vec<String>>>,
+    body: Option<Bytes>,
+    persistent_vars: Arc<RwLock<HashMap<String, String>>>,
+}
+
+impl RequestData {
+    fn new(
+        headers: HashMap<String, String>,
+        query: HashMap<String, Vec<String>>,
+        body: Option<Bytes>,
+        persistent_vars: Arc<RwLock<HashMap<String, String>>>,
+    ) -> Self {
+        Self {
+            headers: Arc::new(normalize_headers(headers)),
+            query: Arc::new(normalize_query(query)),
+            body,
+            persistent_vars,
+        }
+    }
+}
+
+impl Default for RequestData {
+    fn default() -> Self {
+        Self {
+            headers: Arc::new(HashMap::new()),
+            query: Arc::new(HashMap::new()),
+            body: None,
+            persistent_vars: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct ExecutionContext {
     memory: Option<Memory>,
-    req_headers: HashMap<String, String>,
-    query: HashMap<String, Vec<String>>,
-    body: Option<Bytes>,
+    request: RequestData,
     response: ResponseState,
-    persistent_vars: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl ExecutionContext {
@@ -97,11 +129,8 @@ impl ExecutionContext {
     ) -> Self {
         Self {
             memory: None,
-            req_headers: normalize_headers(req_headers),
-            query: normalize_query(query),
-            body,
+            request: RequestData::new(req_headers, query, body, persistent_vars),
             response,
-            persistent_vars,
         }
     }
 
@@ -118,27 +147,27 @@ impl ExecutionContext {
     }
 
     pub fn req_headers(&self) -> &HashMap<String, String> {
-        &self.req_headers
+        &self.request.headers
     }
 
     pub fn req_headers_mut(&mut self) -> &mut HashMap<String, String> {
-        &mut self.req_headers
+        Arc::make_mut(&mut self.request.headers)
     }
 
     pub fn query(&self) -> &HashMap<String, Vec<String>> {
-        &self.query
+        &self.request.query
     }
 
     pub fn query_mut(&mut self) -> &mut HashMap<String, Vec<String>> {
-        &mut self.query
+        Arc::make_mut(&mut self.request.query)
     }
 
     pub fn body(&self) -> &Option<Bytes> {
-        &self.body
+        &self.request.body
     }
 
     pub fn set_body(&mut self, body: Option<Bytes>) {
-        self.body = body;
+        self.request.body = body;
     }
 
     pub fn response(&self) -> &ResponseState {
@@ -147,6 +176,10 @@ impl ExecutionContext {
 
     pub fn response_mut(&mut self) -> &mut ResponseState {
         &mut self.response
+    }
+
+    pub fn persistent_vars(&self) -> &Arc<RwLock<HashMap<String, String>>> {
+        &self.request.persistent_vars
     }
 }
 

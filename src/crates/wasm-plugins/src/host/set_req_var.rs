@@ -1,5 +1,5 @@
 use crate::utils::{read_bytes, with_mem_view};
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::ExecutionContextCell;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn set_req_var_raw(
@@ -23,8 +23,8 @@ fn set_req_var_raw(
         Err(_) => return,
     };
 
-    let mut inner = ctx.data_mut().inner.write();
-    inner.persistent_vars.write().insert(name, value);
+    let inner = ctx.data_mut().inner.write();
+    inner.persistent_vars().write().insert(name, value);
 }
 
 pub fn set_req_var(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {

@@ -11,7 +11,6 @@ pub struct RequestContext {
     pub backend: Arc<DestinationWrapper>,
     pub plugin_runner: Arc<PluginRunner>,
     pub response_headers: Option<HashMap<String, String>>,
-    pub persistent_vars: Arc<RwLock<HashMap<String, String>>>,
     pub plugin_exec_context: Arc<RwLock<ExecutionContext>>,
 }
 
@@ -27,8 +26,11 @@ impl RequestContext {
             backend,
             plugin_runner: Arc::new(runner),
             response_headers: None,
-            persistent_vars: Arc::new(RwLock::new(HashMap::new())),
             plugin_exec_context: Arc::new(RwLock::new(execution_context)),
         }
+    }
+
+    pub fn persistent_vars(&self) -> Arc<RwLock<HashMap<String, String>>> {
+        self.plugin_exec_context.read().persistent_vars().clone()
     }
 }

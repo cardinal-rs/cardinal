@@ -1,5 +1,5 @@
 use crate::host::read_key_lookup_and_write;
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::ExecutionContextCell;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn get_header_raw(

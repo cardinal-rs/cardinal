@@ -1,9 +1,9 @@
 use crate::utils::{read_bytes, with_mem_view};
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::ExecutionContextCell;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn set_header_raw(
-    mut ctx: FunctionEnvMut<ExecutionContextCell>,
+    ctx: FunctionEnvMut<ExecutionContextCell>,
     name_ptr: i32,
     name_len: i32,
     val_ptr: i32,

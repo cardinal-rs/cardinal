@@ -1,5 +1,5 @@
 use crate::utils::{read_bytes, with_mem_view, write_bytes};
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::ExecutionContextCell;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn get_query_param_raw(

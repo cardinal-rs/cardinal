@@ -1,4 +1,4 @@
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::ExecutionContextCell;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn set_status_raw(mut ctx: FunctionEnvMut<ExecutionContextCell>, code: i32) {

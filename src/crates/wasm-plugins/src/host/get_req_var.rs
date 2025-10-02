@@ -1,5 +1,5 @@
-use crate::host::{read_key_lookup_and_write, read_key_lookup_and_write_ref};
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::host::read_key_lookup_and_write_ref;
+use crate::ExecutionContextCell;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn get_req_var_raw(
@@ -9,8 +9,8 @@ fn get_req_var_raw(
     out_ptr: i32,
     out_cap: i32,
 ) -> i32 {
-    let map = &ctx.data().inner.read();
-    let inner_map = map.persistent_vars.read();
+    let map = ctx.data().inner.read();
+    let inner_map = map.persistent_vars().read();
     read_key_lookup_and_write_ref(
         &ctx,
         name_ptr,

@@ -8,7 +8,7 @@ use cardinal_errors::CardinalError;
 use cardinal_wasm_plugins::plugin::WasmPlugin;
 use cardinal_wasm_plugins::runner::{HostFunctionBuilder, HostFunctionMap, WasmRunner};
 use cardinal_wasm_plugins::wasmer::{Function, FunctionEnv, Store};
-use cardinal_wasm_plugins::{ExecutionContext, ExecutionContextCell, ResponseState};
+use cardinal_wasm_plugins::{ExecutionContextCell, ResponseState};
 use pingora::http::ResponseHeader;
 use pingora::prelude::Session;
 use std::collections::HashMap;

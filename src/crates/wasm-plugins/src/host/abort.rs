@@ -1,5 +1,5 @@
 use crate::utils::{read_bytes, with_mem_view};
-use crate::{ExecutionContext, ExecutionContextCell};
+use crate::ExecutionContextCell;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 pub fn abort(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {

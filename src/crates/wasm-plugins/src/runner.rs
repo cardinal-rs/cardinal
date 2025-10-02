@@ -4,7 +4,6 @@ use crate::{ExecutionContext, ExecutionContextCell};
 use bytes::Bytes;
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasmer::TypedFunction;
@@ -68,8 +67,7 @@ impl<'a> WasmRunner<'a> {
 
         let body_opt: Option<Bytes> = {
             let ctx_ref = instance.env.as_ref(&instance.store);
-            // TODO: Use bodyctx_ref.body().clone()
-            None
+            ctx_ref.inner.read().body().clone()
         };
 
         let (ptr, len) = if let Some(body) = body_opt.filter(|b| !b.is_empty()) {

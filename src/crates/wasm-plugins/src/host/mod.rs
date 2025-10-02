@@ -59,8 +59,6 @@ pub fn read_key_lookup_and_write_ref(
         Err(_) => return -1,
     };
 
-    let inner = ctx.data().inner.read();
-
     let Some(val) = map.get(&key) else {
         return -1;
     };

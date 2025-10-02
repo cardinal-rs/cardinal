@@ -335,9 +335,7 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         let headers = response.headers();
-        let shared_header = headers
-            .get("x-shared-token")
-            .and_then(|v| v.to_str().ok());
+        let shared_header = headers.get("x-shared-token").and_then(|v| v.to_str().ok());
         assert_eq!(shared_header, Some("alpha"));
 
         let body = response.body_mut().read_to_string().unwrap();
@@ -372,12 +370,10 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         let headers = response.headers();
-        assert!(
-            headers
-                .get("x-shared-token")
-                .and_then(|v| v.to_str().ok())
-                .is_none()
-        );
+        assert!(headers
+            .get("x-shared-token")
+            .and_then(|v| v.to_str().ok())
+            .is_none());
 
         let body = response.body_mut().read_to_string().unwrap();
         assert_eq!(body, "shared-state-missing-ok");

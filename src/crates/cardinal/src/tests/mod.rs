@@ -541,7 +541,7 @@ mod tests {
                             store,
                             env,
                             move |mut ctx: FunctionEnvMut<
-                                cardinal_wasm_plugins::ExecutionContext,
+                                cardinal_wasm_plugins::ExecutionContextCell,
                             >,
                                   ptr: i32,
                                   len: i32|
@@ -549,12 +549,15 @@ mod tests {
                                 let len = len.max(0);
                                 signal.store(len, Ordering::SeqCst);
 
-                                ctx.data_mut()
-                                    .response_mut()
-                                    .headers_mut()
-                                    .insert("x-env-signal".into(), "from-host".into());
+                                {
+                                    let mut inner = ctx.data_mut().inner.write();
+                                    inner
+                                        .response_mut()
+                                        .headers_mut()
+                                        .insert("x-env-signal".into(), "from-host".into());
+                                }
 
-                                if let Some(memory) = ctx.data().memory() {
+                                if let Some(memory) = ctx.data().inner.read().memory() {
                                     let store_ref = ctx.as_store_ref();
                                     let view = memory.view(&store_ref);
                                     let sentinel = [0xAA, 0xBB, 0xCC, 0xDD];
@@ -658,7 +661,7 @@ mod tests {
                             store,
                             env,
                             move |mut ctx: FunctionEnvMut<
-                                cardinal_wasm_plugins::ExecutionContext,
+                                cardinal_wasm_plugins::ExecutionContextCell,
                             >,
                                   ptr: i32,
                                   len: i32|
@@ -667,12 +670,16 @@ mod tests {
                                 signal.store(len, Ordering::SeqCst);
                                 touched.store(true, Ordering::SeqCst);
 
-                                ctx.data_mut()
-                                    .response_mut()
-                                    .headers_mut()
-                                    .insert("x-env-signal".into(), "from-host".into());
+                                {
+                                    let mut inner = ctx.data_mut().inner.write();
 
-                                if let Some(memory) = ctx.data().memory() {
+                                    inner
+                                        .response_mut()
+                                        .headers_mut()
+                                        .insert("x-env-signal".into(), "from-host".into());
+                                }
+
+                                if let Some(memory) = ctx.data().inner.read().memory() {
                                     let store = ctx.as_store_ref();
                                     let view = memory.view(&store);
                                     let sentinel = [0xAA, 0xBB, 0xCC, 0xDD];

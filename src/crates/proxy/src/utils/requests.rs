@@ -1,6 +1,8 @@
 use cardinal_base::destinations::container::DestinationWrapper;
 use cardinal_errors::proxy::CardinalProxyError;
 use cardinal_errors::CardinalError;
+use cardinal_plugins::utils::parse_query_string_multi;
+use cardinal_wasm_plugins::{ExecutionContext, ResponseState};
 use http::Uri;
 use pingora::http::RequestHeader;
 use pingora::proxy::Session;
@@ -111,6 +113,24 @@ pub(crate) fn set_upstream_host_headers(
     }
 
     Ok(())
+}
+
+pub(crate) fn execution_context_from_request(session: &Session) -> ExecutionContext {
+    let get_req_headers = session
+        .req_header()
+        .headers
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
+        .collect();
+
+    let query = parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
+
+    ExecutionContext::from_parts(
+        get_req_headers,
+        query,
+        None,
+        ResponseState::with_default_status(200),
+    )
 }
 
 #[cfg(test)]

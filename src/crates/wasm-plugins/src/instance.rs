@@ -1,7 +1,7 @@
 use crate::host::make_imports;
 use crate::plugin::WasmPlugin;
 use crate::runner::HostFunctionMap;
-use crate::ExecutionContext;
+use crate::{ExecutionContext, ExecutionContextCell};
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use wasmer::{FunctionEnv, Instance, Memory, Store};
@@ -10,17 +10,16 @@ pub struct WasmInstance {
     pub store: Store,
     pub instance: Instance,
     pub memory: Memory,
-    pub env: FunctionEnv<ExecutionContext>, // <— store the env here
+    pub env: FunctionEnv<ExecutionContextCell>, // <— store the env here
 }
 
 impl WasmInstance {
     pub fn from_plugin(
         plugin: &WasmPlugin,
         host_imports: Option<&HostFunctionMap>,
+        ctx: ExecutionContextCell,
     ) -> Result<Self, CardinalError> {
         let mut store = Store::new(plugin.engine.clone());
-
-        let ctx = ExecutionContext::default();
 
         let env = FunctionEnv::new(&mut store, ctx);
 
@@ -46,7 +45,11 @@ impl WasmInstance {
             })?
             .clone();
 
-        env.as_mut(&mut store).replace_memory(memory.clone());
+        {
+            let mut mut_env = env.as_mut(&mut store);
+            let mut inner_exec_ctx = mut_env.inner.write();
+            inner_exec_ctx.replace_memory(memory.clone());
+        }
 
         Ok(WasmInstance {
             store,

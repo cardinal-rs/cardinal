@@ -1,7 +1,6 @@
 use crate::builtin::restricted_route_middleware::RestrictedRouteMiddleware;
 use crate::request_context::RequestContext;
 use crate::runner::{DynRequestMiddleware, DynResponseMiddleware, MiddlewareResult};
-use crate::utils::parse_query_string_multi;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::provider::Provider;
 use cardinal_config::Plugin;
@@ -9,7 +8,7 @@ use cardinal_errors::CardinalError;
 use cardinal_wasm_plugins::plugin::WasmPlugin;
 use cardinal_wasm_plugins::runner::{HostFunctionBuilder, HostFunctionMap, WasmRunner};
 use cardinal_wasm_plugins::wasmer::{Function, FunctionEnv, Store};
-use cardinal_wasm_plugins::{ExecutionContext, ResponseState};
+use cardinal_wasm_plugins::{ExecutionContext, ExecutionContextCell, ResponseState};
 use pingora::http::ResponseHeader;
 use pingora::prelude::Session;
 use std::collections::HashMap;
@@ -69,7 +68,7 @@ impl PluginContainer {
         name: impl Into<String>,
         builder: F,
     ) where
-        F: Fn(&mut Store, &FunctionEnv<ExecutionContext>) -> Function + Send + Sync + 'static,
+        F: Fn(&mut Store, &FunctionEnv<ExecutionContextCell>) -> Function + Send + Sync + 'static,
     {
         let ns = namespace.into();
         let host_entry = self.host_imports.entry(ns).or_default();
@@ -117,56 +116,39 @@ impl PluginContainer {
                 ))),
             },
             PluginHandler::Wasm(wasm) => {
-                let get_req_headers = session
-                    .req_header()
-                    .headers
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
-                    .collect();
+                let runner = WasmRunner::new(wasm, self.host_imports());
 
-                let query =
-                    parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
+                let mut exec = runner.run(ExecutionContextCell::new_from_arc(
+                    req_ctx.plugin_exec_context.clone(),
+                ))?;
 
+                if !exec.execution_context.req_headers().is_empty() {
+                    for (key, val) in exec.execution_context.req_headers() {
+                        let _ = session.req_header_mut().insert_header(key.to_string(), val);
+                    }
+                }
+
+                if exec
+                    .execution_context
+                    .response()
+                    .status_override()
+                    .is_some()
                 {
-                    let runner = WasmRunner::new(wasm, self.host_imports());
+                    exec.should_continue = false;
+                }
 
-                    let inbound_ctx = ExecutionContext::from_parts(
-                        get_req_headers,
-                        query,
-                        None,
-                        ResponseState::with_default_status(200),
-                    );
-
-                    let mut exec = runner.run(inbound_ctx)?;
-
-                    if !exec.execution_context.req_headers().is_empty() {
-                        for (key, val) in exec.execution_context.req_headers() {
-                            let _ = session.req_header_mut().insert_header(key.to_string(), val);
-                        }
-                    }
-
-                    if exec
-                        .execution_context
-                        .response()
-                        .status_override()
-                        .is_some()
-                    {
-                        exec.should_continue = false;
-                    }
-
-                    if exec.should_continue {
-                        Ok(MiddlewareResult::Continue(
-                            exec.execution_context.response().headers().clone(),
-                        ))
-                    } else {
-                        let response_state = exec.execution_context.response();
-                        let header_response = Self::build_response_header(response_state);
-                        let _ = session
-                            .write_response_header(Box::new(header_response), false)
-                            .await;
-                        let _ = session.respond_error(response_state.status()).await;
-                        Ok(MiddlewareResult::Responded)
-                    }
+                if exec.should_continue {
+                    Ok(MiddlewareResult::Continue(
+                        exec.execution_context.response().headers().clone(),
+                    ))
+                } else {
+                    let response_state = exec.execution_context.response();
+                    let header_response = Self::build_response_header(response_state);
+                    let _ = session
+                        .write_response_header(Box::new(header_response), false)
+                        .await;
+                    let _ = session.respond_error(response_state.status()).await;
+                    Ok(MiddlewareResult::Responded)
                 }
             }
         }
@@ -196,43 +178,26 @@ impl PluginContainer {
                     }
                 },
                 PluginHandler::Wasm(wasm) => {
-                    let get_req_headers = session
-                        .req_header()
-                        .headers
-                        .iter()
-                        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
-                        .collect();
-                    let query =
-                        parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
+                    let runner = WasmRunner::new(wasm, self.host_imports());
 
-                    {
-                        let runner = WasmRunner::new(wasm, self.host_imports());
+                    let exec = runner.run(ExecutionContextCell::new_from_arc(
+                        req_ctx.plugin_exec_context.clone(),
+                    ));
 
-                        let outbound_ctx = ExecutionContext::from_parts(
-                            get_req_headers,
-                            query,
-                            None,
-                            ResponseState::default(),
-                        );
+                    match &exec {
+                        Ok(ex) => {
+                            let response_state = ex.execution_context.response();
 
-                        let exec = runner.run(outbound_ctx);
-
-                        match &exec {
-                            Ok(ex) => {
-                                let response_state = ex.execution_context.response();
-
-                                for (key, val) in response_state.headers() {
-                                    let _ =
-                                        response.insert_header(key.to_string(), val.to_string());
-                                }
-
-                                if let Some(status) = response_state.status_override() {
-                                    let _ = response.set_status(status);
-                                }
+                            for (key, val) in response_state.headers() {
+                                let _ = response.insert_header(key.to_string(), val.to_string());
                             }
-                            Err(e) => {
-                                error!("Failed to run plugin {}: {}", name, e);
+
+                            if let Some(status) = response_state.status_override() {
+                                let _ = response.set_status(status);
                             }
+                        }
+                        Err(e) => {
+                            error!("Failed to run plugin {}: {}", name, e);
                         }
                     }
                 }

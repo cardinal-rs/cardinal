@@ -1,19 +1,21 @@
 use crate::runner::HostFunctionMap;
 use crate::utils::{read_bytes, with_mem_view, write_bytes};
-use crate::ExecutionContext;
+use crate::{ExecutionContext, ExecutionContextCell};
 use std::collections::HashMap;
 use wasmer::{Exports, FunctionEnv, FunctionEnvMut, Imports, Store};
 
 mod abort;
 pub mod get_header;
 mod get_query_param;
+mod get_req_var;
 mod set_header;
+mod set_req_var;
 mod set_status;
 
 /// Read key from guest, optionally normalize, look it up using `get_map`,
 /// write value into guest up to `out_cap`, return written bytes or -1.
 pub fn read_key_lookup_and_write(
-    ctx: &FunctionEnvMut<ExecutionContext>,
+    ctx: &FunctionEnvMut<ExecutionContextCell>,
     key_ptr: i32,
     key_len: i32,
     out_ptr: i32,
@@ -36,7 +38,9 @@ pub fn read_key_lookup_and_write(
         Err(_) => return -1,
     };
 
-    let map_mutex = get_map(ctx.data());
+    let inner = ctx.data().inner.read();
+
+    let map_mutex = get_map(&*inner);
     let Some(val) = map_mutex.get(&key) else {
         return -1;
     };
@@ -51,7 +55,7 @@ pub fn read_key_lookup_and_write(
 
 pub fn make_imports(
     store: &mut Store,
-    env: &FunctionEnv<ExecutionContext>,
+    env: &FunctionEnv<ExecutionContextCell>,
     host_imports: Option<&HostFunctionMap>,
 ) -> Imports {
     let mut imports = Imports::new();
@@ -65,6 +69,9 @@ pub fn make_imports(
     );
     ns.insert("set_header", set_header::set_header(store, env));
     ns.insert("set_status", set_status::set_status(store, env));
+
+    ns.insert("set_req_var", set_req_var::set_req_var(store, env));
+    ns.insert("get_req_var", get_req_var::get_req_var(store, env));
 
     if let Some(host_map) = host_imports {
         if let Some(extra_env) = host_map.get("env") {

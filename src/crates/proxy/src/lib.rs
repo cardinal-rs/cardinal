@@ -1,7 +1,8 @@
 mod utils;
 
 use crate::utils::requests::{
-    compose_upstream_url, parse_origin, rewrite_request_path, set_upstream_host_headers,
+    compose_upstream_url, execution_context_from_request, parse_origin, rewrite_request_path,
+    set_upstream_host_headers,
 };
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationContainer;
@@ -125,7 +126,12 @@ impl ProxyHttp for CardinalProxy {
 
         rewrite_request_path(session.req_header_mut(), &destination_name, force_path);
 
-        let mut request_state = RequestContext::new(context.clone(), backend);
+        let mut request_state = RequestContext::new(
+            context.clone(),
+            backend,
+            execution_context_from_request(session),
+        );
+
         let plugin_runner = request_state.plugin_runner.clone();
 
         let run_filters = plugin_runner

@@ -362,7 +362,7 @@ checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
 name = "cardinal-base"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "async-trait",
  "cardinal-config",
@@ -376,7 +376,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-cli"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "cardinal-errors",
  "cardinal-rs",
@@ -386,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-config"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "config",
  "derive_builder",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-errors"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "config",
  "serde",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-plugins"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "async-trait",
  "cardinal-base",
@@ -416,26 +416,30 @@ dependencies = [
  "cardinal-wasm-plugins",
  "form_urlencoded",
  "http",
+ "parking_lot",
  "pingora",
  "tracing",
 ]
 
 [[package]]
 name = "cardinal-proxy"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "async-trait",
+ "bytes",
  "cardinal-base",
  "cardinal-errors",
  "cardinal-plugins",
+ "cardinal-wasm-plugins",
  "http",
  "pingora",
+ "serde_json",
  "tracing",
 ]
 
 [[package]]
 name = "cardinal-rs"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "async-trait",
  "cardinal-base",
@@ -453,12 +457,13 @@ dependencies = [
 
 [[package]]
 name = "cardinal-wasm-plugins"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "bytes",
  "cardinal-errors",
  "derive_builder",
  "enum-as-inner",
+ "parking_lot",
  "serde_json",
  "tracing",
  "wasmer",

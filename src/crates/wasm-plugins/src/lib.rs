@@ -1,6 +1,8 @@
 use ::wasmer::Memory;
 use bytes::Bytes;
+use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct ResponseState {
@@ -159,6 +161,22 @@ fn normalize_query(query: HashMap<String, Vec<String>>) -> HashMap<String, Vec<S
         .collect()
 }
 
+pub struct ExecutionContextCell {
+    pub inner: Arc<RwLock<ExecutionContext>>,
+}
+
+impl ExecutionContextCell {
+    pub fn new(ctx: ExecutionContext) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(ctx)),
+        }
+    }
+
+    pub fn new_from_arc(ctx: Arc<RwLock<ExecutionContext>>) -> Self {
+        Self { inner: ctx }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,7 +239,7 @@ mod tests {
 
         let runner = WasmRunner::new(&wasm_plugin, None);
         let result = runner
-            .run(exec_ctx)
+            .run(ExecutionContextCell::new(exec_ctx))
             .unwrap_or_else(|e| panic!("plugin execution failed for {:?}: {}", wasm_path, e));
 
         assert_eq!(

@@ -1,8 +1,10 @@
 use crate::instance::WasmInstance;
 use crate::plugin::WasmPlugin;
-use crate::ExecutionContext;
+use crate::{ExecutionContext, ExecutionContextCell};
+use bytes::Bytes;
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasmer::TypedFunction;
@@ -15,7 +17,7 @@ pub struct ExecutionResult {
 }
 
 pub type HostFunctionBuilder =
-    Arc<dyn Fn(&mut Store, &FunctionEnv<ExecutionContext>) -> Function + Send + Sync>;
+    Arc<dyn Fn(&mut Store, &FunctionEnv<ExecutionContextCell>) -> Function + Send + Sync>;
 pub type HostFunctionMap = HashMap<String, Vec<(String, HostFunctionBuilder)>>;
 
 pub struct WasmRunner<'a> {
@@ -31,16 +33,17 @@ impl<'a> WasmRunner<'a> {
         }
     }
 
-    pub fn run(&self, exec_ctx: ExecutionContext) -> Result<ExecutionResult, CardinalError> {
+    pub fn run(&self, exec_ctx: ExecutionContextCell) -> Result<ExecutionResult, CardinalError> {
         // 1) Instantiate a fresh instance per request
-        let mut instance = WasmInstance::from_plugin(self.plugin, self.host_imports)?;
+        let mut instance = WasmInstance::from_plugin(self.plugin, self.host_imports, exec_ctx)?;
 
-        {
-            let ctx = instance.env.as_mut(&mut instance.store);
-            let memory = ctx.memory().clone();
-            *ctx = exec_ctx;
-            *ctx.memory_mut() = memory;
-        }
+        // I don't think we need this anymore
+        // {
+        //     let ctx = instance.env.as_mut(&mut instance.store);
+        //     let memory = ctx.memory().clone();
+        //     *ctx = exec_ctx;
+        //     *ctx.memory_mut() = memory;
+        // }
 
         // 3) Get exports
         let handle: TypedFunction<(i32, i32), i32> = instance
@@ -63,9 +66,10 @@ impl<'a> WasmRunner<'a> {
                 )))
             })?;
 
-        let body_opt = {
+        let body_opt: Option<Bytes> = {
             let ctx_ref = instance.env.as_ref(&instance.store);
-            ctx_ref.body().clone()
+            // TODO: Use bodyctx_ref.body().clone()
+            None
         };
 
         let (ptr, len) = if let Some(body) = body_opt.filter(|b| !b.is_empty()) {
@@ -97,9 +101,14 @@ impl<'a> WasmRunner<'a> {
             )))
         })?;
 
+        let exec_ctx_clone = {
+            let exec_ctx = instance.env.as_ref(&instance.store).inner.read();
+            exec_ctx.clone()
+        };
+
         Ok(ExecutionResult {
             should_continue: decision == 1,
-            execution_context: instance.env.as_ref(&instance.store).clone(),
+            execution_context: exec_ctx_clone,
         })
     }
 }

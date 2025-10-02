@@ -2,7 +2,7 @@ use crate::host::read_key_lookup_and_write;
 use crate::{ExecutionContext, ExecutionContextCell};
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
-fn get_header_raw(
+fn get_req_var_raw(
     ctx: FunctionEnvMut<ExecutionContextCell>,
     name_ptr: i32,
     name_len: i32,
@@ -14,6 +14,6 @@ fn get_header_raw(
     })
 }
 
-pub fn get_header(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {
-    Function::new_typed_with_env(store, env, get_header_raw)
+pub fn get_req_var(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {
+    Function::new_typed_with_env(store, env, get_req_var_raw)
 }

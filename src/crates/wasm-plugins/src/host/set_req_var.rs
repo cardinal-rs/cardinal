@@ -2,7 +2,7 @@ use crate::utils::{read_bytes, with_mem_view};
 use crate::{ExecutionContext, ExecutionContextCell};
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
-fn set_header_raw(
+fn set_req_var_raw(
     mut ctx: FunctionEnvMut<ExecutionContextCell>,
     name_ptr: i32,
     name_len: i32,
@@ -23,11 +23,10 @@ fn set_header_raw(
         Err(_) => return,
     };
 
-    let mut inner = ctx.data().inner.write();
-
+    let mut inner = ctx.data_mut().inner.write();
     inner.response_mut().headers_mut().insert(name, value);
 }
 
-pub fn set_header(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {
-    Function::new_typed_with_env(store, env, set_header_raw)
+pub fn set_req_var(store: &mut Store, env: &FunctionEnv<ExecutionContextCell>) -> Function {
+    Function::new_typed_with_env(store, env, set_req_var_raw)
 }

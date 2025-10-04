@@ -19,3 +19,4 @@ matchit.workspace = true
 parking_lot.workspace = true
 pingora.workspace = true
 http.workspace = true
+regex = "1.11.1"

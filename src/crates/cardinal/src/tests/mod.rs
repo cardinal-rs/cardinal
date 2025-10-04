@@ -8,7 +8,10 @@ mod tests {
     use cardinal_base::context::CardinalContext;
     use cardinal_base::destinations::container::DestinationWrapper;
     use cardinal_base::provider::ProviderScope;
-    use cardinal_config::{load_config, CardinalConfig};
+    use cardinal_config::{
+        load_config, CardinalConfig, Destination, DestinationMatch, DestinationMatchValue,
+        ServerConfig,
+    };
     use cardinal_errors::CardinalError;
     use cardinal_plugins::container::{PluginBuiltInType, PluginContainer, PluginHandler};
     use cardinal_plugins::headers::CARDINAL_PARAMS_HEADER_BASE;
@@ -18,7 +21,7 @@ mod tests {
     use cardinal_wasm_plugins::plugin::WasmPlugin;
     use cardinal_wasm_plugins::wasmer::AsStoreRef;
     use pingora::proxy::Session;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
@@ -70,6 +73,46 @@ mod tests {
 
     fn spawn_backend(address: impl Into<String>, routes: Vec<Route>) -> TestHttpServer {
         create_server_with(address.into(), routes)
+    }
+
+    fn config_with_destinations(
+        server_addr: &str,
+        force_path_parameter: bool,
+        destinations: Vec<Destination>,
+    ) -> CardinalConfig {
+        let mut map = BTreeMap::new();
+        for destination in destinations {
+            map.insert(destination.name.clone(), destination);
+        }
+
+        CardinalConfig {
+            server: ServerConfig {
+                address: server_addr.to_string(),
+                force_path_parameter,
+                log_upstream_response: true,
+                global_request_middleware: vec![],
+                global_response_middleware: vec![],
+            },
+            destinations: map,
+            plugins: vec![],
+        }
+    }
+
+    fn destination_with_match(
+        name: &str,
+        url: &str,
+        matcher: Option<DestinationMatch>,
+        default: bool,
+    ) -> Destination {
+        Destination {
+            name: name.to_string(),
+            url: url.to_string(),
+            health_check: None,
+            default,
+            r#match: matcher,
+            routes: vec![],
+            middleware: vec![],
+        }
     }
 
     fn cardinal_with_plugin_factory<F>(config: CardinalConfig, init: F) -> Cardinal
@@ -1069,6 +1112,327 @@ mod tests {
 
         let body = response.body_mut().read_to_string().unwrap();
         assert_eq!(body, "outbound-skip");
+    }
+
+    #[tokio::test]
+    async fn routes_path_exact_before_prefix() {
+        let server_addr = "127.0.0.1:1840";
+        let exact_backend_addr = "127.0.0.1:1841";
+        let prefix_backend_addr = "127.0.0.1:1842";
+
+        let exact_destination = destination_with_match(
+            "status_exact",
+            exact_backend_addr,
+            Some(DestinationMatch {
+                host: Some(DestinationMatchValue::String("status.example.com".into())),
+                path_prefix: None,
+                path_exact: Some("/status".into()),
+            }),
+            false,
+        );
+
+        let prefix_destination = destination_with_match(
+            "status_prefix",
+            prefix_backend_addr,
+            Some(DestinationMatch {
+                host: Some(DestinationMatchValue::String("status.example.com".into())),
+                path_prefix: Some(DestinationMatchValue::String("/status".into())),
+                path_exact: None,
+            }),
+            false,
+        );
+
+        let config = config_with_destinations(
+            server_addr,
+            false,
+            vec![exact_destination.clone(), prefix_destination.clone()],
+        );
+
+        let _exact_backend = spawn_backend(
+            exact_backend_addr,
+            vec![Route::new(Method::Get, "/status", move |request| {
+                let response = Response::from_string("exact");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let _prefix_backend = spawn_backend(
+            prefix_backend_addr,
+            vec![Route::new(Method::Get, "/status/health", move |request| {
+                let response = Response::from_string("prefix");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(server_addr, "/status"))
+            .header("Host", "status.example.com")
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "exact");
+
+        let mut response = ureq::get(&http_url(server_addr, "/status/health"))
+            .header("Host", "status.example.com")
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "prefix");
+    }
+
+    #[tokio::test]
+    async fn routes_regex_hosts_and_falls_back_to_default() {
+        let server_addr = "127.0.0.1:1843";
+        let v1_backend_addr = "127.0.0.1:1844";
+        let v2_backend_addr = "127.0.0.1:1845";
+        let fallback_backend_addr = "127.0.0.1:1846";
+
+        let regex_match = |path: &str| DestinationMatch {
+            host: Some(DestinationMatchValue::Regex {
+                regex: "^api\\.(eu|us)\\.example\\.com$".into(),
+            }),
+            path_prefix: Some(DestinationMatchValue::String(path.into())),
+            path_exact: None,
+        };
+
+        let config = config_with_destinations(
+            server_addr,
+            false,
+            vec![
+                destination_with_match("v1", v1_backend_addr, Some(regex_match("/v1")), false),
+                destination_with_match("v2", v2_backend_addr, Some(regex_match("/v2")), false),
+                destination_with_match("fallback", fallback_backend_addr, None, true),
+            ],
+        );
+
+        let _v1_backend = spawn_backend(
+            v1_backend_addr,
+            vec![Route::new(Method::Get, "/v1/items", move |request| {
+                let response = Response::from_string("v1");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let _v2_backend = spawn_backend(
+            v2_backend_addr,
+            vec![Route::new(Method::Get, "/v2/items", move |request| {
+                let response = Response::from_string("v2");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let _fallback_backend = spawn_backend(
+            fallback_backend_addr,
+            vec![Route::new(Method::Get, "/v3/unknown", move |request| {
+                let response = Response::from_string("fallback");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(server_addr, "/v2/items"))
+            .header("Host", "api.eu.example.com")
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "v2");
+
+        let mut response = ureq::get(&http_url(server_addr, "/v3/unknown"))
+            .header("Host", "api.eu.example.com")
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "fallback");
+    }
+
+    #[tokio::test]
+    async fn hostless_destinations_follow_configuration_order() {
+        let server_addr = "127.0.0.1:1847";
+        let first_backend_addr = "127.0.0.1:1848";
+        let second_backend_addr = "127.0.0.1:1849";
+        let fallback_backend_addr = "127.0.0.1:1850";
+
+        let first_destination = destination_with_match(
+            "reports_a_regex",
+            first_backend_addr,
+            Some(DestinationMatch {
+                host: None,
+                path_prefix: Some(DestinationMatchValue::Regex {
+                    regex: "^/reports/.*".into(),
+                }),
+                path_exact: None,
+            }),
+            false,
+        );
+
+        let second_destination = destination_with_match(
+            "reports_b_prefix",
+            second_backend_addr,
+            Some(DestinationMatch {
+                host: None,
+                path_prefix: Some(DestinationMatchValue::String("/reports".into())),
+                path_exact: None,
+            }),
+            false,
+        );
+
+        let fallback_destination =
+            destination_with_match("fallback", fallback_backend_addr, None, true);
+
+        let config = config_with_destinations(
+            server_addr,
+            false,
+            vec![first_destination, second_destination, fallback_destination],
+        );
+
+        let _first_backend = spawn_backend(
+            first_backend_addr,
+            vec![Route::new(Method::Get, "/reports/daily", move |request| {
+                let response = Response::from_string("regex");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let _second_backend = spawn_backend(
+            second_backend_addr,
+            vec![
+                Route::new(Method::Get, "/reports", move |request| {
+                    let response = Response::from_string("prefix-root");
+                    let _ = request.respond(response);
+                }),
+                Route::new(Method::Get, "/reports/daily", move |request| {
+                    let response = Response::from_string("prefix-daily");
+                    let _ = request.respond(response);
+                }),
+            ],
+        );
+
+        let _fallback_backend = spawn_backend(
+            fallback_backend_addr,
+            vec![Route::new(Method::Get, "/other", move |request| {
+                let response = Response::from_string("fallback");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(server_addr, "/reports/daily"))
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "regex");
+
+        let mut response = ureq::get(&http_url(server_addr, "/reports"))
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "prefix-root");
+    }
+
+    #[tokio::test]
+    async fn force_parameter_unknown_segment_uses_default() {
+        let server_addr = "127.0.0.1:1851";
+        let default_backend_addr = "127.0.0.1:1852";
+
+        let default_destination =
+            destination_with_match("fallback", default_backend_addr, None, true);
+
+        let config = config_with_destinations(server_addr, true, vec![default_destination]);
+
+        let _default_backend = spawn_backend(
+            default_backend_addr,
+            vec![Route::new(Method::Get, "/unknown/path", move |request| {
+                let response = Response::from_string("default");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(server_addr, "/unknown/path"))
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "default");
+    }
+
+    #[tokio::test]
+    async fn returns_404_when_no_default_matches() {
+        let server_addr = "127.0.0.1:1853";
+        let billing_backend_addr = "127.0.0.1:1854";
+        let support_backend_addr = "127.0.0.1:1855";
+
+        let billing_destination = destination_with_match(
+            "billing",
+            billing_backend_addr,
+            Some(DestinationMatch {
+                host: Some(DestinationMatchValue::String("billing.example.com".into())),
+                path_prefix: Some(DestinationMatchValue::String("/billing".into())),
+                path_exact: None,
+            }),
+            false,
+        );
+
+        let support_destination = destination_with_match(
+            "support",
+            support_backend_addr,
+            Some(DestinationMatch {
+                host: Some(DestinationMatchValue::String("support.example.com".into())),
+                path_prefix: Some(DestinationMatchValue::String("/support".into())),
+                path_exact: None,
+            }),
+            false,
+        );
+
+        let config = config_with_destinations(
+            server_addr,
+            false,
+            vec![billing_destination, support_destination],
+        );
+
+        let _billing_backend = spawn_backend(
+            billing_backend_addr,
+            vec![Route::new(Method::Get, "/billing/orders", move |request| {
+                let response = Response::from_string("billing");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(server_addr, "/billing/orders"))
+            .header("Host", "billing.example.com")
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "billing");
+
+        let err = ureq::get(&http_url(server_addr, "/unknown"))
+            .header("Host", "billing.example.com")
+            .call()
+            .expect_err("expected 404 when no destination matches");
+        expect_status(err, 404);
     }
 
     #[tokio::test]

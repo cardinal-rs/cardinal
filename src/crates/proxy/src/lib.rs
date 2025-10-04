@@ -112,7 +112,7 @@ impl ProxyHttp for CardinalProxy {
         let force_path = context.config.server.force_path_parameter;
         let backend =
             match destination_container.get_backend_for_request(session.req_header(), force_path) {
-                Some(b) => b.clone(),
+                Some(b) => b,
                 None => {
                     warn!(%path, "No matching backend, returning 404");
                     let _ = session.respond_error(404).await;

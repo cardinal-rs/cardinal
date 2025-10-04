@@ -31,7 +31,7 @@ pub fn read_key_lookup_and_write(
         out_ptr,
         out_cap,
         normalize_key,
-        get_map(&*inner),
+        get_map(&inner),
     )
 }
 

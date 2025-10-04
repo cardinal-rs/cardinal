@@ -85,23 +85,27 @@ impl DestinationContainer {
 #[async_trait]
 impl Provider for DestinationContainer {
     async fn provide(ctx: &CardinalContext) -> Result<Self, CardinalError> {
-        let (destinations, default_destination) = ctx.config.destinations.clone().into_iter().fold(
-            (BTreeMap::new(), None),
-            |(mut map, default), (key, destination)| {
-                let is_default = destination.default;
-                let wrapper = Arc::new(DestinationWrapper::new(destination, None));
-                let default = if is_default {
-                    Some(wrapper.clone())
-                } else {
-                    default
-                };
+        let mut destinations: BTreeMap<String, Arc<DestinationWrapper>> = BTreeMap::new();
+        let mut default_destination = None;
+        let mut wrappers: Vec<Arc<DestinationWrapper>> = Vec::new();
 
-                map.insert(key, wrapper);
-                (map, default)
-            },
-        );
+        for (key, destination) in ctx.config.destinations.clone() {
+            let has_match = destination.r#match.is_some();
+            let wrapper = Arc::new(DestinationWrapper::new(destination, None));
 
-        let matcher = DestinationMatcherIndex::new(destinations.values().cloned())?;
+            if wrapper.destination.default {
+                default_destination = Some(wrapper.clone());
+            }
+
+            if !has_match {
+                destinations.insert(key, Arc::clone(&wrapper));
+            }
+            // Every destination participates in the matcher, even if it also lives in the
+            // legacy map (for matcher-less configs).
+            wrappers.push(wrapper);
+        }
+
+        let matcher = DestinationMatcherIndex::new(wrappers.into_iter())?;
 
         Ok(Self {
             destinations,
@@ -248,17 +252,22 @@ mod tests {
     fn build_container(entries: Vec<(&str, Destination)>) -> DestinationContainer {
         let mut destinations = BTreeMap::new();
         let mut default_destination = None;
+        let mut wrappers = Vec::new();
 
         for (key, destination) in entries {
-            let is_default = destination.default;
+            let has_match = destination.r#match.is_some();
             let wrapper = Arc::new(DestinationWrapper::new(destination, None));
-            if is_default {
+            if wrapper.destination.default {
                 default_destination = Some(wrapper.clone());
             }
-            destinations.insert(key.to_string(), wrapper);
+            if !has_match {
+                destinations.insert(key.to_string(), Arc::clone(&wrapper));
+            }
+            // The matcher should see every destination regardless of legacy eligibility.
+            wrappers.push(wrapper);
         }
 
-        let matcher = DestinationMatcherIndex::new(destinations.values().cloned()).unwrap();
+        let matcher = DestinationMatcherIndex::new(wrappers.into_iter()).unwrap();
 
         DestinationContainer {
             destinations,
@@ -339,6 +348,399 @@ mod tests {
         let req = req_with_host_header("unknown.example.com", "/unknown");
         let resolved = container.get_backend_for_request(&req, false).unwrap();
         assert_eq!(resolved.destination.name, "primary");
+    }
+
+    #[test]
+    fn does_not_reintroduce_non_matching_host_rule() {
+        let mut entries = Vec::new();
+        entries.push((
+            "billing",
+            destination_config(
+                "billing",
+                Some(DestinationMatchValue::String("billing.example.com".into())),
+                Some(DestinationMatchValue::String("/billing".into())),
+                None,
+                false,
+            ),
+        ));
+
+        let default_destination = Destination {
+            name: "fallback".into(),
+            url: "https://fallback.internal".into(),
+            health_check: None,
+            default: true,
+            r#match: None,
+            routes: Vec::new(),
+            middleware: Vec::new(),
+        };
+
+        entries.push(("fallback", default_destination));
+
+        let container = build_container(entries);
+        let req = req_with_host_header("billing.example.com", "/other");
+
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "fallback");
+    }
+
+    #[test]
+    fn selects_destination_among_shared_host_paths() {
+        let container = build_container(vec![
+            (
+                "billing",
+                destination_config(
+                    "billing",
+                    Some(DestinationMatchValue::String("api.example.com".into())),
+                    Some(DestinationMatchValue::String("/billing".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "support",
+                destination_config(
+                    "support",
+                    Some(DestinationMatchValue::String("api.example.com".into())),
+                    Some(DestinationMatchValue::String("/support".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "fallback",
+                Destination {
+                    name: "fallback".into(),
+                    url: "https://fallback.internal".into(),
+                    health_check: None,
+                    default: true,
+                    r#match: None,
+                    routes: Vec::new(),
+                    middleware: Vec::new(),
+                },
+            ),
+        ]);
+
+        let req = req_with_host_header("api.example.com", "/support/ticket");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "support");
+    }
+
+    #[test]
+    fn falls_back_when_shared_host_paths_do_not_match() {
+        let container = build_container(vec![
+            (
+                "billing",
+                destination_config(
+                    "billing",
+                    Some(DestinationMatchValue::String("api.example.com".into())),
+                    Some(DestinationMatchValue::String("/billing".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "fallback",
+                Destination {
+                    name: "fallback".into(),
+                    url: "https://fallback.internal".into(),
+                    health_check: None,
+                    default: true,
+                    r#match: None,
+                    routes: Vec::new(),
+                    middleware: Vec::new(),
+                },
+            ),
+        ]);
+
+        let req = req_with_host_header("api.example.com", "/reports");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "fallback");
+    }
+
+    #[test]
+    fn host_regex_entries_consider_path_rules() {
+        let container = build_container(vec![
+            (
+                "billing",
+                destination_config(
+                    "billing",
+                    Some(DestinationMatchValue::Regex {
+                        regex: "^api\\.(eu|us)\\.example\\.com$".into(),
+                    }),
+                    Some(DestinationMatchValue::String("/billing".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "support",
+                destination_config(
+                    "support",
+                    Some(DestinationMatchValue::Regex {
+                        regex: "^api\\.(eu|us)\\.example\\.com$".into(),
+                    }),
+                    Some(DestinationMatchValue::String("/support".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "fallback",
+                Destination {
+                    name: "fallback".into(),
+                    url: "https://fallback.internal".into(),
+                    health_check: None,
+                    default: true,
+                    r#match: None,
+                    routes: Vec::new(),
+                    middleware: Vec::new(),
+                },
+            ),
+        ]);
+
+        let req = req_with_host_header("api.eu.example.com", "/support/chat");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "support");
+    }
+
+    #[test]
+    fn hostless_entries_respect_path_order() {
+        let container = build_container(vec![
+            (
+                "reports",
+                destination_config(
+                    "reports",
+                    None,
+                    Some(DestinationMatchValue::Regex {
+                        regex: "^/reports/(daily|weekly)".into(),
+                    }),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "billing",
+                destination_config(
+                    "billing",
+                    None,
+                    Some(DestinationMatchValue::String("/billing".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "fallback",
+                Destination {
+                    name: "fallback".into(),
+                    url: "https://fallback.internal".into(),
+                    health_check: None,
+                    default: true,
+                    r#match: None,
+                    routes: Vec::new(),
+                    middleware: Vec::new(),
+                },
+            ),
+        ]);
+
+        let req_reports = req_with_host_header("any.example.com", "/reports/daily/summary");
+        let resolved_reports = container
+            .get_backend_for_request(&req_reports, false)
+            .unwrap();
+        assert_eq!(resolved_reports.destination.name, "reports");
+
+        let req_billing = req_with_host_header("any.example.com", "/billing/invoice");
+        let resolved_billing = container
+            .get_backend_for_request(&req_billing, false)
+            .unwrap();
+        assert_eq!(resolved_billing.destination.name, "billing");
+
+        let req_fallback = req_with_host_header("any.example.com", "/unknown");
+        let resolved_fallback = container
+            .get_backend_for_request(&req_fallback, false)
+            .unwrap();
+        assert_eq!(resolved_fallback.destination.name, "fallback");
+    }
+
+    #[test]
+    fn force_parameter_ignores_match_enabled_destinations() {
+        let container = build_container(vec![
+            (
+                "matched",
+                destination_config(
+                    "matched",
+                    Some(DestinationMatchValue::String("api.example.com".into())),
+                    Some(DestinationMatchValue::String("/matched".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "fallback",
+                Destination {
+                    name: "fallback".into(),
+                    url: "https://fallback.internal".into(),
+                    health_check: None,
+                    default: true,
+                    r#match: None,
+                    routes: Vec::new(),
+                    middleware: Vec::new(),
+                },
+            ),
+        ]);
+
+        let req = req_with_path("/matched/orders");
+        let resolved = container.get_backend_for_request(&req, true).unwrap();
+        assert_eq!(resolved.destination.name, "fallback");
+    }
+
+    #[test]
+    fn path_exact_precedence_over_prefix() {
+        let container = build_container(vec![
+            (
+                "status_exact",
+                destination_config(
+                    "status_exact",
+                    Some(DestinationMatchValue::String("status.example.com".into())),
+                    None,
+                    Some("/status"),
+                    false,
+                ),
+            ),
+            (
+                "status_prefix",
+                destination_config(
+                    "status_prefix",
+                    Some(DestinationMatchValue::String("status.example.com".into())),
+                    Some(DestinationMatchValue::String("/status".into())),
+                    None,
+                    false,
+                ),
+            ),
+        ]);
+
+        let req = req_with_host_header("status.example.com", "/status");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "status_exact");
+    }
+
+    #[test]
+    fn regex_host_prefers_matching_path_before_default() {
+        let container = build_container(vec![
+            (
+                "v1",
+                destination_config(
+                    "v1",
+                    Some(DestinationMatchValue::Regex {
+                        regex: "^api\\.(eu|us)\\.example\\.com$".into(),
+                    }),
+                    Some(DestinationMatchValue::String("/v1".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "v2",
+                destination_config(
+                    "v2",
+                    Some(DestinationMatchValue::Regex {
+                        regex: "^api\\.(eu|us)\\.example\\.com$".into(),
+                    }),
+                    Some(DestinationMatchValue::String("/v2".into())),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "fallback",
+                Destination {
+                    name: "fallback".into(),
+                    url: "https://fallback.internal".into(),
+                    health_check: None,
+                    default: true,
+                    r#match: None,
+                    routes: Vec::new(),
+                    middleware: Vec::new(),
+                },
+            ),
+        ]);
+
+        let req_v2 = req_with_host_header("api.eu.example.com", "/v2/items");
+        let resolved_v2 = container.get_backend_for_request(&req_v2, false).unwrap();
+        assert_eq!(resolved_v2.destination.name, "v2");
+
+        let req_none = req_with_host_header("api.eu.example.com", "/v3/unknown");
+        let resolved_none = container.get_backend_for_request(&req_none, false).unwrap();
+        assert_eq!(resolved_none.destination.name, "fallback");
+    }
+
+    #[test]
+    fn hostless_entries_prioritize_config_order() {
+        let container = build_container(vec![
+            (
+                "reports_regex",
+                destination_config(
+                    "reports_regex",
+                    None,
+                    Some(DestinationMatchValue::Regex {
+                        regex: "^/reports/.*".into(),
+                    }),
+                    None,
+                    false,
+                ),
+            ),
+            (
+                "reports_prefix",
+                destination_config(
+                    "reports_prefix",
+                    None,
+                    Some(DestinationMatchValue::String("/reports".into())),
+                    None,
+                    false,
+                ),
+            ),
+        ]);
+
+        let req = req_with_host_header("any.example.com", "/reports/daily");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "reports_regex");
+    }
+
+    #[test]
+    fn force_parameter_falls_back_to_default_when_unknown() {
+        let container = build_container(vec![(
+            "fallback",
+            Destination {
+                name: "fallback".into(),
+                url: "https://fallback.internal".into(),
+                health_check: None,
+                default: true,
+                r#match: None,
+                routes: Vec::new(),
+                middleware: Vec::new(),
+            },
+        )]);
+
+        let req = req_with_path("/unknown/path");
+        let resolved = container.get_backend_for_request(&req, true).unwrap();
+        assert_eq!(resolved.destination.name, "fallback");
+    }
+
+    #[test]
+    fn returns_none_when_no_match_and_no_default() {
+        let container = build_container(vec![(
+            "matcher_only",
+            destination_config(
+                "matcher_only",
+                Some(DestinationMatchValue::String("api.example.com".into())),
+                Some(DestinationMatchValue::String("/matcher".into())),
+                None,
+                false,
+            ),
+        )]);
+
+        let req = req_with_host_header("api.example.com", "/unknown");
+        let resolved = container.get_backend_for_request(&req, false);
+        assert!(resolved.is_none());
     }
 
     #[test]

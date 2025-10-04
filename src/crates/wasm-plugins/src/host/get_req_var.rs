@@ -11,15 +11,7 @@ fn get_req_var_raw(
 ) -> i32 {
     let map = ctx.data().read();
     let inner_map = map.persistent_vars().read();
-    read_key_lookup_and_write_ref(
-        &ctx,
-        name_ptr,
-        name_len,
-        out_ptr,
-        out_cap,
-        true,
-        &inner_map,
-    )
+    read_key_lookup_and_write_ref(&ctx, name_ptr, name_len, out_ptr, out_cap, true, &inner_map)
 }
 
 pub fn get_req_var(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {

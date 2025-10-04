@@ -1263,7 +1263,7 @@ mod tests {
         let fallback_backend_addr = "127.0.0.1:1850";
 
         let first_destination = destination_with_match(
-            "reports_regex",
+            "reports_a_regex",
             first_backend_addr,
             Some(DestinationMatch {
                 host: None,
@@ -1276,7 +1276,7 @@ mod tests {
         );
 
         let second_destination = destination_with_match(
-            "reports_prefix",
+            "reports_b_prefix",
             second_backend_addr,
             Some(DestinationMatch {
                 host: None,
@@ -1305,10 +1305,16 @@ mod tests {
 
         let _second_backend = spawn_backend(
             second_backend_addr,
-            vec![Route::new(Method::Get, "/reports", move |request| {
-                let response = Response::from_string("prefix");
-                let _ = request.respond(response);
-            })],
+            vec![
+                Route::new(Method::Get, "/reports", move |request| {
+                    let response = Response::from_string("prefix-root");
+                    let _ = request.respond(response);
+                }),
+                Route::new(Method::Get, "/reports/daily", move |request| {
+                    let response = Response::from_string("prefix-daily");
+                    let _ = request.respond(response);
+                }),
+            ],
         );
 
         let _fallback_backend = spawn_backend(
@@ -1329,6 +1335,13 @@ mod tests {
         assert_eq!(response.status(), 200);
         let body = response.body_mut().read_to_string().unwrap();
         assert_eq!(body, "regex");
+
+        let mut response = ureq::get(&http_url(server_addr, "/reports"))
+            .call()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "prefix-root");
     }
 
     #[tokio::test]

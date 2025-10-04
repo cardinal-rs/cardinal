@@ -91,7 +91,15 @@ impl Provider for DestinationContainer {
 
         for (key, destination) in ctx.config.destinations.clone() {
             let has_match = destination.r#match.is_some();
-            let wrapper = Arc::new(DestinationWrapper::new(destination, None));
+            let router = destination
+                .routes
+                .iter()
+                .fold(CardinalRouter::new(), |mut r, route| {
+                    let _ = r.add(route.method.as_str(), route.path.as_str());
+                    r
+                });
+
+            let wrapper = Arc::new(DestinationWrapper::new(destination, Some(router)));
 
             if wrapper.destination.default {
                 default_destination = Some(wrapper.clone());

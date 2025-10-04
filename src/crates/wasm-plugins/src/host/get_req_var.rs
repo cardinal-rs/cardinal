@@ -18,7 +18,7 @@ fn get_req_var_raw(
         out_ptr,
         out_cap,
         true,
-        &*inner_map,
+        &inner_map,
     )
 }
 

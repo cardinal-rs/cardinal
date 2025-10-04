@@ -1,4 +1,5 @@
 use crate::context::CardinalContext;
+use crate::destinations::matcher::DestinationMatcherIndex;
 use crate::provider::Provider;
 use crate::router::CardinalRouter;
 use async_trait::async_trait;
@@ -52,6 +53,7 @@ impl DestinationWrapper {
 pub struct DestinationContainer {
     destinations: BTreeMap<String, Arc<DestinationWrapper>>,
     default_destination: Option<Arc<DestinationWrapper>>,
+    matcher: DestinationMatcherIndex,
 }
 
 impl DestinationContainer {
@@ -60,16 +62,23 @@ impl DestinationContainer {
         req: &RequestHeader,
         force_parameter: bool,
     ) -> Option<Arc<DestinationWrapper>> {
-        let candidate_id = if force_parameter {
-            first_path_segment(req)
+        let matcher_hit = if force_parameter {
+            None
         } else {
-            extract_subdomain(req)
-        }?;
+            self.matcher.resolve(req)
+        };
 
-        self.destinations
-            .get(&candidate_id)
-            .cloned()
-            .or_else(|| self.default_destination.clone())
+        matcher_hit.or_else(|| {
+            let candidate = if force_parameter {
+                first_path_segment(req)
+            } else {
+                extract_subdomain(req)
+            };
+
+            candidate
+                .and_then(|key| self.destinations.get(&key).cloned())
+                .or_else(|| self.default_destination.clone())
+        })
     }
 }
 
@@ -92,9 +101,12 @@ impl Provider for DestinationContainer {
             },
         );
 
+        let matcher = DestinationMatcherIndex::new(destinations.values().cloned())?;
+
         Ok(Self {
             destinations,
             default_destination,
+            matcher,
         })
     }
 }
@@ -134,7 +146,10 @@ fn extract_subdomain(req: &RequestHeader) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cardinal_config::{Destination, DestinationMatch, DestinationMatchValue};
     use http::{Method, Uri};
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     fn req_with_path(pq: &str) -> RequestHeader {
         RequestHeader::build(Method::GET, pq.as_bytes(), None).unwrap()
@@ -206,5 +221,161 @@ mod tests {
         let uri: Uri = "http://API.Example.com/any".parse().unwrap();
         req.set_uri(uri);
         assert_eq!(extract_subdomain(&req), Some("api".to_string()));
+    }
+
+    fn destination_config(
+        name: &str,
+        host: Option<DestinationMatchValue>,
+        path_prefix: Option<DestinationMatchValue>,
+        path_exact: Option<&str>,
+        default: bool,
+    ) -> Destination {
+        Destination {
+            name: name.to_string(),
+            url: format!("https://{name}.internal"),
+            health_check: None,
+            default,
+            r#match: Some(DestinationMatch {
+                host,
+                path_prefix,
+                path_exact: path_exact.map(|s| s.to_string()),
+            }),
+            routes: Vec::new(),
+            middleware: Vec::new(),
+        }
+    }
+
+    fn build_container(entries: Vec<(&str, Destination)>) -> DestinationContainer {
+        let mut destinations = BTreeMap::new();
+        let mut default_destination = None;
+
+        for (key, destination) in entries {
+            let is_default = destination.default;
+            let wrapper = Arc::new(DestinationWrapper::new(destination, None));
+            if is_default {
+                default_destination = Some(wrapper.clone());
+            }
+            destinations.insert(key.to_string(), wrapper);
+        }
+
+        let matcher = DestinationMatcherIndex::new(destinations.values().cloned()).unwrap();
+
+        DestinationContainer {
+            destinations,
+            default_destination,
+            matcher,
+        }
+    }
+
+    #[test]
+    fn resolves_destination_by_host_match() {
+        let container = build_container(vec![(
+            "customer",
+            destination_config(
+                "customer",
+                Some(DestinationMatchValue::String("support.example.com".into())),
+                None,
+                None,
+                false,
+            ),
+        )]);
+
+        let req = req_with_host_header("support.example.com", "/any");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "customer");
+    }
+
+    #[test]
+    fn resolves_destination_by_host_regex() {
+        let container = build_container(vec![(
+            "billing",
+            destination_config(
+                "billing",
+                Some(DestinationMatchValue::Regex {
+                    regex: "^api\\.(eu|us)\\.example\\.com$".into(),
+                }),
+                None,
+                None,
+                false,
+            ),
+        )]);
+
+        let req = req_with_host_header("api.eu.example.com", "/billing/pay");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "billing");
+    }
+
+    #[test]
+    fn resolves_destination_by_path_prefix() {
+        let container = build_container(vec![(
+            "helpdesk",
+            destination_config(
+                "helpdesk",
+                None,
+                Some(DestinationMatchValue::String("/helpdesk".into())),
+                None,
+                false,
+            ),
+        )]);
+
+        let req = req_with_host_header("any.example.com", "/helpdesk/ticket");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "helpdesk");
+    }
+
+    #[test]
+    fn falls_back_to_default_when_no_match() {
+        let container = build_container(vec![(
+            "primary",
+            destination_config(
+                "primary",
+                Some(DestinationMatchValue::String("app.example.com".into())),
+                None,
+                None,
+                true,
+            ),
+        )]);
+
+        let req = req_with_host_header("unknown.example.com", "/unknown");
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "primary");
+    }
+
+    #[test]
+    fn force_parameter_uses_path_segment_lookup() {
+        let destination = Destination {
+            name: "segment".into(),
+            url: "https://segment.internal".into(),
+            health_check: None,
+            default: false,
+            r#match: None,
+            routes: Vec::new(),
+            middleware: Vec::new(),
+        };
+
+        let container = build_container(vec![("segment", destination)]);
+        let req = req_with_path("/segment/orders");
+
+        let resolved = container.get_backend_for_request(&req, true).unwrap();
+        assert_eq!(resolved.destination.name, "segment");
+    }
+
+    #[test]
+    fn falls_back_to_subdomain_key_when_present() {
+        let destination = Destination {
+            name: "api".into(),
+            url: "https://api.internal".into(),
+            health_check: None,
+            default: false,
+            r#match: None,
+            routes: Vec::new(),
+            middleware: Vec::new(),
+        };
+
+        let container = build_container(vec![("api", destination)]);
+        let req = req_with_host_header("api.mygateway.com", "/any");
+
+        let resolved = container.get_backend_for_request(&req, false).unwrap();
+        assert_eq!(resolved.destination.name, "api");
     }
 }

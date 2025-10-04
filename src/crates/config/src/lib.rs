@@ -99,11 +99,29 @@ impl Serialize for Plugin {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DestinationMatchValue {
+    String(String),
+    Regex { regex: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder)]
+pub struct DestinationMatch {
+    pub host: Option<DestinationMatchValue>, // exact or wildcard “*.tenant.com”
+    pub path_prefix: Option<DestinationMatchValue>, // e.g. “/billing/”
+    pub path_exact: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct Destination {
     pub name: String,
     pub url: String,
     pub health_check: Option<HealthCheck>,
+    #[serde(default)]
+    pub default: bool,
+    #[serde(default)]
+    pub r#match: Option<DestinationMatch>,
     #[serde(default)]
     pub routes: Vec<Route>,
     #[serde(default)]
@@ -216,6 +234,7 @@ pub fn validate_config(config: &CardinalConfig) -> Result<(), ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::{Deserialize, Serialize};
     use serde_json::{json, to_value};
 
     #[test]
@@ -293,5 +312,192 @@ path = "plugins/ratelimit.wasm"
 "#;
 
         assert_eq!(toml_str, expected);
+    }
+
+    #[test]
+    fn destination_match_value_string_roundtrip_json() {
+        let value = DestinationMatchValue::String("api.example.com".to_string());
+        let serialized = to_value(&value).unwrap();
+
+        assert_eq!(serialized, json!("api.example.com"));
+
+        let from_string: DestinationMatchValue =
+            serde_json::from_value(json!("api.example.com")).unwrap();
+        assert_eq!(from_string, value);
+    }
+
+    #[test]
+    fn destination_match_value_regex_roundtrip_json() {
+        let value = DestinationMatchValue::Regex {
+            regex: "^api\\.".to_string(),
+        };
+        let serialized = to_value(&value).unwrap();
+
+        assert_eq!(serialized, json!({"regex": "^api\\."}));
+
+        let decoded: DestinationMatchValue =
+            serde_json::from_value(json!({"regex": "^api\\."})).unwrap();
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn destination_match_value_string_roundtrip_toml() {
+        let value = DestinationMatchValue::String("billing".to_string());
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct Wrapper {
+            value: DestinationMatchValue,
+        }
+
+        let toml_encoded = toml::to_string(&Wrapper {
+            value: value.clone(),
+        })
+        .unwrap();
+        assert_eq!(toml_encoded, "value = \"billing\"\n");
+
+        let decoded: Wrapper = toml::from_str(&toml_encoded).unwrap();
+        assert_eq!(decoded.value, value);
+    }
+
+    #[test]
+    fn destination_match_value_regex_roundtrip_toml() {
+        let value = DestinationMatchValue::Regex {
+            regex: "^/billing".to_string(),
+        };
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct Wrapper {
+            value: DestinationMatchValue,
+        }
+
+        let toml_encoded = toml::to_string(&Wrapper {
+            value: value.clone(),
+        })
+        .unwrap();
+        assert_eq!(toml_encoded, "[value]\nregex = \"^/billing\"\n");
+
+        let decoded: Wrapper = toml::from_str(&toml_encoded).unwrap();
+        assert_eq!(decoded.value, value);
+    }
+
+    #[test]
+    fn destination_struct_match_variants() {
+        let string_toml = r#"
+name = "customer_service"
+url = "https://svc.internal/api"
+
+[match]
+host = "support.example.com"
+path_prefix = "/helpdesk"
+"#;
+
+        let customer: Destination = toml::from_str(string_toml).unwrap();
+        let matcher = customer.r#match.as_ref().expect("expected match section");
+        assert_eq!(
+            matcher.host,
+            Some(DestinationMatchValue::String("support.example.com".into()))
+        );
+        assert_eq!(
+            matcher.path_prefix,
+            Some(DestinationMatchValue::String("/helpdesk".into()))
+        );
+        assert_eq!(matcher.path_exact, None);
+
+        let regex_toml = r#"
+name = "billing"
+url = "https://billing.internal"
+
+[match]
+host = { regex = '^api\.(eu|us)\.example\.com$' }
+path_prefix = { regex = '^/billing/(v\d+)/' }
+"#;
+
+        let billing: Destination = toml::from_str(regex_toml).unwrap();
+        let matcher = billing.r#match.as_ref().expect("expected match section");
+        assert_eq!(
+            matcher.host,
+            Some(DestinationMatchValue::Regex {
+                regex: r"^api\.(eu|us)\.example\.com$".into()
+            })
+        );
+        assert_eq!(
+            matcher.path_prefix,
+            Some(DestinationMatchValue::Regex {
+                regex: r"^/billing/(v\d+)/".into()
+            })
+        );
+        assert_eq!(matcher.path_exact, None);
+    }
+
+    #[test]
+    fn destination_match_toml_mixed_variants() {
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct ConfigHarness {
+            destinations: BTreeMap<String, DestinationHarness>,
+        }
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct DestinationHarness {
+            name: String,
+            url: String,
+            #[serde(rename = "match")]
+            matcher: Option<DestinationMatch>,
+        }
+
+        impl DestinationHarness {
+            fn matcher(&self) -> &DestinationMatch {
+                self.matcher.as_ref().expect("matcher section present")
+            }
+        }
+
+        let toml_source = r#"
+[destinations.customer_service]
+name = "customer_service"
+url = "https://svc.internal/api"
+
+[destinations.customer_service.match]
+host = "support.example.com"
+path_prefix = "/helpdesk"
+
+[destinations.billing]
+name = "billing"
+url = "https://billing.internal"
+
+[destinations.billing.match]
+host = { regex = '^api\.(eu|us)\.example\.com$' }
+path_prefix = { regex = '^/billing/(v\d+)/' }
+"#;
+
+        let parsed: ConfigHarness = toml::from_str(toml_source).unwrap();
+
+        let customer = parsed
+            .destinations
+            .get("customer_service")
+            .unwrap()
+            .matcher();
+        assert_eq!(
+            customer.host,
+            Some(DestinationMatchValue::String("support.example.com".into()))
+        );
+        assert_eq!(
+            customer.path_prefix,
+            Some(DestinationMatchValue::String("/helpdesk".into()))
+        );
+
+        let billing = parsed.destinations.get("billing").unwrap().matcher();
+        assert_eq!(
+            billing.host,
+            Some(DestinationMatchValue::Regex {
+                regex: r"^api\.(eu|us)\.example\.com$".into()
+            })
+        );
+        assert_eq!(
+            billing.path_prefix,
+            Some(DestinationMatchValue::Regex {
+                regex: r"^/billing/(v\d+)/".into()
+            })
+        );
+
+        let serialized = toml::to_string(&parsed).unwrap();
+        let reparsed: ConfigHarness = toml::from_str(&serialized).unwrap();
+        assert_eq!(reparsed, parsed);
     }
 }

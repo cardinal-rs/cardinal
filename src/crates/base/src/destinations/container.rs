@@ -51,6 +51,7 @@ impl DestinationWrapper {
 
 pub struct DestinationContainer {
     destinations: BTreeMap<String, Arc<DestinationWrapper>>,
+    default_destination: Option<Arc<DestinationWrapper>>,
 }
 
 impl DestinationContainer {
@@ -59,41 +60,42 @@ impl DestinationContainer {
         req: &RequestHeader,
         force_parameter: bool,
     ) -> Option<Arc<DestinationWrapper>> {
-        let candidate_id = if !force_parameter {
-            extract_subdomain(req)
-        } else {
+        let candidate_id = if force_parameter {
             first_path_segment(req)
-        };
+        } else {
+            extract_subdomain(req)
+        }?;
 
-        self.destinations.get(&candidate_id?).cloned()
+        self.destinations
+            .get(&candidate_id)
+            .cloned()
+            .or_else(|| self.default_destination.clone())
     }
 }
 
 #[async_trait]
 impl Provider for DestinationContainer {
     async fn provide(ctx: &CardinalContext) -> Result<Self, CardinalError> {
-        let destinations = ctx
-            .config
-            .destinations
-            .clone()
-            .into_iter()
-            .map(|(key, destination)| {
-                let router =
-                    destination
-                        .routes
-                        .iter()
-                        .fold(CardinalRouter::new(), |mut r, route| {
-                            let _ = r.add(route.method.as_str(), route.path.as_str());
-                            r
-                        });
-                (
-                    key,
-                    Arc::new(DestinationWrapper::new(destination, Some(router))),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        let (destinations, default_destination) = ctx.config.destinations.clone().into_iter().fold(
+            (BTreeMap::new(), None),
+            |(mut map, default), (key, destination)| {
+                let is_default = destination.default;
+                let wrapper = Arc::new(DestinationWrapper::new(destination, None));
+                let default = if is_default {
+                    Some(wrapper.clone())
+                } else {
+                    default
+                };
 
-        Ok(Self { destinations })
+                map.insert(key, wrapper);
+                (map, default)
+            },
+        );
+
+        Ok(Self {
+            destinations,
+            default_destination,
+        })
     }
 }
 

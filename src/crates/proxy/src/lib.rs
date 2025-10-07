@@ -4,6 +4,7 @@ use crate::utils::requests::{
     compose_upstream_url, execution_context_from_request, parse_origin, rewrite_request_path,
     set_upstream_host_headers,
 };
+use bytes::Bytes;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationContainer;
 use cardinal_plugins::request_context::RequestContext;
@@ -21,6 +22,7 @@ pub mod pingora {
 
 #[derive(Debug, Clone)]
 pub enum HealthCheckStatus {
+    None,
     Ready,
     Unavailable {
         status_code: u16,
@@ -31,7 +33,7 @@ pub enum HealthCheckStatus {
 pub trait CardinalContextProvider: Send + Sync {
     fn resolve(&self, session: &Session) -> Option<Arc<CardinalContext>>;
     fn health_check(&self, _session: &Session) -> HealthCheckStatus {
-        HealthCheckStatus::Ready
+        HealthCheckStatus::None
     }
 }
 
@@ -108,7 +110,25 @@ impl ProxyHttp for CardinalProxy {
         info!(%path, "Request received");
 
         match self.provider.health_check(session) {
-            HealthCheckStatus::Ready => {}
+            HealthCheckStatus::None => {}
+            HealthCheckStatus::Ready => {
+                debug!(%path, "Health check ready");
+                // Build a 200 OK header
+                let mut resp = ResponseHeader::build(200, None)?;
+                resp.insert_header("Content-Type", "text/plain")?;
+                resp.set_content_length("healthy\n".len())?;
+
+                // Send header + body to the client
+                session
+                    .write_response_header(Box::new(resp), /*end_of_stream*/ false)
+                    .await?;
+                session
+                    .write_response_body(Some(Bytes::from_static(b"healthy\n")), /*end*/ true)
+                    .await?;
+
+                // Returning Ok(true) means "handled", stop further processing.
+                return Ok(true);
+            }
             HealthCheckStatus::Unavailable {
                 status_code,
                 reason,

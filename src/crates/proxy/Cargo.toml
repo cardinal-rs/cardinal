@@ -12,12 +12,12 @@ categories = ["network-programming", "web-programming::http-server"]
 
 [dependencies]
 pingora = { workspace = true, features = ["openssl"] }
-cardinal-base = { path = "../base", version = "0.2.27" }
+cardinal-base = { path = "../base", version = "0.2.28" }
 tracing.workspace = true
 http.workspace = true
-cardinal-errors = { path = "../errors", version = "0.2.27" }
-cardinal-plugins = { path = "../plugins", version = "0.2.27" }
-cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.27" }
+cardinal-errors = { path = "../errors", version = "0.2.28" }
+cardinal-plugins = { path = "../plugins", version = "0.2.28" }
+cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.28" }
 async-trait.workspace = true
 bytes = "1.10.1"
 serde_json = "1.0.145"

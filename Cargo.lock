@@ -362,7 +362,7 @@ checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
 name = "cardinal-base"
-version = "0.2.26"
+version = "0.2.27"
 dependencies = [
  "async-trait",
  "cardinal-config",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-cli"
-version = "0.2.26"
+version = "0.2.27"
 dependencies = [
  "cardinal-errors",
  "cardinal-rs",
@@ -387,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-config"
-version = "0.2.26"
+version = "0.2.27"
 dependencies = [
  "config",
  "derive_builder",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-errors"
-version = "0.2.26"
+version = "0.2.27"
 dependencies = [
  "config",
  "serde",
@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-plugins"
-version = "0.2.26"
+version = "0.2.27"
 dependencies = [
  "async-trait",
  "cardinal-base",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-proxy"
-version = "0.2.26"
+version = "0.2.27"
 dependencies = [
  "async-trait",
  "bytes",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-rs"
-version = "0.2.26"
+version = "0.2.27"
 dependencies = [
  "async-trait",
  "cardinal-base",
@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-wasm-plugins"
-version = "0.2.26"
+version = "0.2.27"
 dependencies = [
  "bytes",
  "cardinal-errors",

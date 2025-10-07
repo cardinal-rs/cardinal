@@ -19,8 +19,20 @@ pub mod pingora {
     pub use pingora::*;
 }
 
+#[derive(Debug, Clone)]
+pub enum HealthCheckStatus {
+    Ready,
+    Unavailable {
+        status_code: u16,
+        reason: Option<String>,
+    },
+}
+
 pub trait CardinalContextProvider: Send + Sync {
     fn resolve(&self, session: &Session) -> Option<Arc<CardinalContext>>;
+    fn health_check(&self, _session: &Session) -> HealthCheckStatus {
+        HealthCheckStatus::Ready
+    }
 }
 
 #[derive(Clone)]
@@ -94,6 +106,22 @@ impl ProxyHttp for CardinalProxy {
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
         let path = session.req_header().uri.path().to_string();
         info!(%path, "Request received");
+
+        match self.provider.health_check(session) {
+            HealthCheckStatus::Ready => {}
+            HealthCheckStatus::Unavailable {
+                status_code,
+                reason,
+            } => {
+                if let Some(reason) = reason {
+                    warn!(%path, status = status_code, reason = %reason, "Health check failed");
+                } else {
+                    warn!(%path, status = status_code, "Health check failed");
+                }
+                let _ = session.respond_error(status_code).await;
+                return Ok(true);
+            }
+        }
 
         let context = match self.provider.resolve(session) {
             Some(ctx) => ctx,

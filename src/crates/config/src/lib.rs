@@ -3,10 +3,12 @@ use ::config::ConfigError;
 use derive_builder::Builder;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
+use ts_rs::TS;
 
 pub mod config;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]
+#[ts(export)]
 pub struct HealthCheck {
     pub path: String,
     pub interval_ms: u64,
@@ -14,19 +16,22 @@ pub struct HealthCheck {
     pub expect_status: u16,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
 pub enum MiddlewareType {
     Inbound,
     Outbound,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]
+#[ts(export)]
 pub struct Middleware {
     pub r#type: MiddlewareType,
     pub name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, TS)]
+#[ts(export)]
 pub enum Plugin {
     Builtin(BuiltinPlugin),
     Wasm(WasmPluginConfig),
@@ -41,12 +46,14 @@ impl Plugin {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]
+#[ts(export)]
 pub struct BuiltinPlugin {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]
+#[ts(export)]
 pub struct WasmPluginConfig {
     pub name: String,
     pub path: String,
@@ -54,8 +61,9 @@ pub struct WasmPluginConfig {
     pub handle_name: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(untagged)]
+#[ts(export)]
 enum PluginSerde {
     Name(String),
     Builtin { builtin: BuiltinPlugin },
@@ -99,21 +107,24 @@ impl Serialize for Plugin {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(untagged)]
+#[ts(export)]
 pub enum DestinationMatchValue {
     String(String),
     Regex { regex: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder, TS)]
+#[ts(export)]
 pub struct DestinationMatch {
     pub host: Option<DestinationMatchValue>, // exact or wildcard “*.tenant.com”
     pub path_prefix: Option<DestinationMatchValue>, // e.g. “/billing/”
     pub path_exact: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]
+#[ts(export)]
 pub struct Destination {
     pub name: String,
     pub url: String,
@@ -128,7 +139,8 @@ pub struct Destination {
     pub middleware: Vec<Middleware>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]
+#[ts(export)]
 pub struct ServerConfig {
     pub address: String,
     pub force_path_parameter: bool,
@@ -137,13 +149,15 @@ pub struct ServerConfig {
     pub global_response_middleware: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]
+#[ts(export)]
 pub struct Route {
     pub path: String,
     pub method: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Builder, TS)]
+#[ts(export)]
 pub struct CardinalConfig {
     pub server: ServerConfig,
     pub destinations: BTreeMap<String, Destination>,
@@ -523,6 +537,41 @@ path_prefix = { regex = '^/billing/(v\d+)/' }
                 regex: r"^/billing/(v\d+)/".into()
             })
         );
+
+        let serialized = toml::to_string(&parsed).unwrap();
+        let reparsed: ConfigHarness = toml::from_str(&serialized).unwrap();
+        assert_eq!(reparsed, parsed);
+    }
+
+    #[test]
+    fn destination_match_allows_empty_array() {
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct ConfigHarness {
+            destinations: BTreeMap<String, DestinationHarness>,
+        }
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct DestinationHarness {
+            name: String,
+            url: String,
+            #[serde(rename = "match")]
+            matcher: Option<Vec<DestinationMatch>>,
+        }
+
+        let toml_source = r#"
+[destinations.empty]
+name = "empty"
+url = "https://empty.internal"
+match = []
+"#;
+
+        let parsed: ConfigHarness = toml::from_str(toml_source).unwrap();
+        let destination = parsed.destinations.get("empty").unwrap();
+        assert!(destination
+            .matcher
+            .as_ref()
+            .map(|entries| entries.is_empty())
+            .unwrap_or(false));
 
         let serialized = toml::to_string(&parsed).unwrap();
         let reparsed: ConfigHarness = toml::from_str(&serialized).unwrap();

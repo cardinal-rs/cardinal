@@ -760,6 +760,48 @@ mod tests {
     }
 
     #[test]
+    fn multi_match_destination_skips_legacy_map() {
+        let destination = Destination {
+            name: "shared".into(),
+            url: "https://shared.internal".into(),
+            health_check: None,
+            default: false,
+            r#match: Some(vec![
+                DestinationMatch {
+                    host: Some(DestinationMatchValue::String("api.example.com".into())),
+                    path_prefix: Some(DestinationMatchValue::String("/billing".into())),
+                    path_exact: None,
+                },
+                DestinationMatch {
+                    host: Some(DestinationMatchValue::Regex {
+                        regex: "^api\\..+".into(),
+                    }),
+                    path_prefix: Some(DestinationMatchValue::String("/regex".into())),
+                    path_exact: None,
+                },
+            ]),
+            routes: Vec::new(),
+            middleware: Vec::new(),
+        };
+
+        let container = build_container(vec![("shared", destination)]);
+
+        assert!(container.destinations.get("shared").is_none());
+
+        let exact_req = req_with_host_header("api.example.com", "/billing/invoices");
+        let exact_resolved = container
+            .get_backend_for_request(&exact_req, false)
+            .unwrap();
+        assert_eq!(exact_resolved.destination.name, "shared");
+
+        let regex_req = req_with_host_header("api.example.com", "/regex/search");
+        let regex_resolved = container
+            .get_backend_for_request(&regex_req, false)
+            .unwrap();
+        assert_eq!(regex_resolved.destination.name, "shared");
+    }
+
+    #[test]
     fn force_parameter_uses_path_segment_lookup() {
         let destination = Destination {
             name: "segment".into(),

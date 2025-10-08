@@ -333,6 +333,37 @@ mod tests {
     }
 
     #[test]
+    fn exact_host_entries_are_prioritized_before_regex() {
+        let destination = build_destination_with_matchers(
+            "api",
+            Some(vec![
+                DestinationMatch {
+                    host: Some(DestinationMatchValue::String("api.example.com".into())),
+                    path_prefix: Some(DestinationMatchValue::String("/billing".into())),
+                    path_exact: None,
+                },
+                DestinationMatch {
+                    host: Some(DestinationMatchValue::Regex {
+                        regex: "^api\\..+".into(),
+                    }),
+                    path_prefix: Some(DestinationMatchValue::String("/regex".into())),
+                    path_exact: None,
+                },
+            ]),
+        );
+
+        let matcher = DestinationMatcherIndex::new(vec![destination.clone()].into_iter()).unwrap();
+
+        let exact_req = build_request("api.example.com", "/billing/invoices");
+        let exact_destination = matcher.resolve(&exact_req).unwrap();
+        assert_eq!(exact_destination.destination.name, "api");
+
+        let regex_req = build_request("api.example.com", "/regex/search");
+        let regex_destination = matcher.resolve(&regex_req).unwrap();
+        assert_eq!(regex_destination.destination.name, "api");
+    }
+
+    #[test]
     fn matches_path_prefix() {
         let hostless = build_destination(
             "helpdesk",

@@ -362,7 +362,7 @@ checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
 name = "cardinal-base"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "async-trait",
  "cardinal-config",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-cli"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "cardinal-errors",
  "cardinal-rs",
@@ -387,19 +387,20 @@ dependencies = [
 
 [[package]]
 name = "cardinal-config"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "config",
  "derive_builder",
  "serde",
  "serde_json",
  "toml",
+ "ts-rs",
  "walkdir",
 ]
 
 [[package]]
 name = "cardinal-errors"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "config",
  "serde",
@@ -408,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-plugins"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "async-trait",
  "cardinal-base",
@@ -424,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-proxy"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "async-trait",
  "bytes",
@@ -441,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-rs"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "async-trait",
  "cardinal-base",
@@ -459,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "cardinal-wasm-plugins"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "bytes",
  "cardinal-errors",
@@ -3635,6 +3636,29 @@ checksum = "ebeb235c5847e2f82cfe0f07eb971d1e5f6804b18dac2ae16349cc604380f82f"
 dependencies = [
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "ts-rs"
+version = "10.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e640d9b0964e9d39df633548591090ab92f7a4567bc31d3891af23471a3365c6"
+dependencies = [
+ "lazy_static",
+ "thiserror 2.0.16",
+ "ts-rs-macros",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "10.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e9d8656589772eeec2cf7a8264d9cda40fb28b9bc53118ceb9e8c07f8f38730"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+ "termcolor",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cardinal_config::DestinationMatchValue;
+use cardinal_config::{DestinationMatch, DestinationMatchValue};
 use cardinal_errors::CardinalError;
 use pingora::http::RequestHeader;
 use regex::Regex;
@@ -23,25 +23,31 @@ impl DestinationMatcherIndex {
         let mut hostless: Vec<CompiledDestination> = Vec::new();
 
         for wrapper in destinations {
-            if wrapper.destination.r#match.is_none() {
+            let Some(matchers) = wrapper.destination.r#match.as_ref() else {
+                continue;
+            };
+
+            if matchers.is_empty() {
                 continue;
             }
 
-            let compiled = CompiledEntry::try_from(wrapper)?;
-            match compiled.host_matcher {
-                Some(CompiledHostMatcher::Exact(host)) => {
-                    exact_host
-                        .entry(host)
-                        .or_default()
-                        .push(compiled.destination);
+            for matcher in matchers {
+                let compiled = CompiledEntry::try_from(wrapper.clone(), matcher)?;
+                match compiled.host_matcher {
+                    Some(CompiledHostMatcher::Exact(host)) => {
+                        exact_host
+                            .entry(host)
+                            .or_default()
+                            .push(compiled.destination);
+                    }
+                    Some(CompiledHostMatcher::Regex(regex)) => {
+                        regex_host.push(RegexHostEntry {
+                            matcher: regex,
+                            destination: compiled.destination,
+                        });
+                    }
+                    None => hostless.push(compiled.destination),
                 }
-                Some(CompiledHostMatcher::Regex(regex)) => {
-                    regex_host.push(RegexHostEntry {
-                        matcher: regex,
-                        destination: compiled.destination,
-                    });
-                }
-                None => hostless.push(compiled.destination),
             }
         }
 
@@ -98,16 +104,13 @@ struct CompiledEntry {
 }
 
 impl CompiledEntry {
-    fn try_from(wrapper: Arc<DestinationWrapper>) -> Result<Self, CardinalError> {
-        let matcher = wrapper.destination.r#match.clone();
-
-        let (host_matcher, path_prefix, path_exact) = if let Some(matcher) = matcher {
-            let host_matcher = compile_host_matcher(matcher.host.as_ref())?;
-            let path_prefix = compile_path_prefix(matcher.path_prefix.as_ref())?;
-            (host_matcher, path_prefix, matcher.path_exact.clone())
-        } else {
-            (None, None, None)
-        };
+    fn try_from(
+        wrapper: Arc<DestinationWrapper>,
+        matcher: &DestinationMatch,
+    ) -> Result<Self, CardinalError> {
+        let host_matcher = compile_host_matcher(matcher.host.as_ref())?;
+        let path_prefix = compile_path_prefix(matcher.path_prefix.as_ref())?;
+        let path_exact = matcher.path_exact.clone();
 
         let destination = CompiledDestination {
             wrapper,
@@ -230,16 +233,26 @@ mod tests {
         path_prefix: Option<DestinationMatchValue>,
         path_exact: Option<&str>,
     ) -> Arc<DestinationWrapper> {
+        build_destination_with_matchers(
+            name,
+            Some(vec![DestinationMatch {
+                host,
+                path_prefix,
+                path_exact: path_exact.map(|s| s.to_string()),
+            }]),
+        )
+    }
+
+    fn build_destination_with_matchers(
+        name: &str,
+        matchers: Option<Vec<DestinationMatch>>,
+    ) -> Arc<DestinationWrapper> {
         let destination = Destination {
             name: name.to_string(),
             url: "https://example.com".to_string(),
             health_check: None,
             default: false,
-            r#match: Some(DestinationMatch {
-                host,
-                path_prefix,
-                path_exact: path_exact.map(|s| s.to_string()),
-            }),
+            r#match: matchers,
             routes: Vec::new(),
             middleware: Vec::new(),
         };
@@ -285,6 +298,38 @@ mod tests {
 
         let resolved = matcher.resolve(&req).unwrap();
         assert_eq!(resolved.destination.name, "billing");
+    }
+
+    #[test]
+    fn supports_multiple_match_entries_per_destination() {
+        let destination = build_destination_with_matchers(
+            "api",
+            Some(vec![
+                DestinationMatch {
+                    host: Some(DestinationMatchValue::String("api.example.com".into())),
+                    path_prefix: Some(DestinationMatchValue::String("/billing".into())),
+                    path_exact: None,
+                },
+                DestinationMatch {
+                    host: Some(DestinationMatchValue::String("api.example.com".into())),
+                    path_prefix: Some(DestinationMatchValue::String("/support".into())),
+                    path_exact: None,
+                },
+            ]),
+        );
+
+        let matcher = DestinationMatcherIndex::new(vec![destination.clone()].into_iter()).unwrap();
+
+        let billing_req = build_request("api.example.com", "/billing/payments");
+        let billing_destination = matcher.resolve(&billing_req).unwrap();
+        assert_eq!(billing_destination.destination.name, "api");
+
+        let support_req = build_request("api.example.com", "/support/chat");
+        let support_destination = matcher.resolve(&support_req).unwrap();
+        assert_eq!(support_destination.destination.name, "api");
+
+        let missing_req = build_request("api.example.com", "/reports");
+        assert!(matcher.resolve(&missing_req).is_none());
     }
 
     #[test]

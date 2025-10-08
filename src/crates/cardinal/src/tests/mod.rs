@@ -101,7 +101,7 @@ mod tests {
     fn destination_with_match(
         name: &str,
         url: &str,
-        matcher: Option<DestinationMatch>,
+        matcher: Option<Vec<DestinationMatch>>,
         default: bool,
     ) -> Destination {
         Destination {
@@ -113,6 +113,10 @@ mod tests {
             routes: vec![],
             middleware: vec![],
         }
+    }
+
+    fn single_match(matcher: DestinationMatch) -> Option<Vec<DestinationMatch>> {
+        Some(vec![matcher])
     }
 
     fn cardinal_with_plugin_factory<F>(config: CardinalConfig, init: F) -> Cardinal
@@ -1123,7 +1127,7 @@ mod tests {
         let exact_destination = destination_with_match(
             "status_exact",
             exact_backend_addr,
-            Some(DestinationMatch {
+            single_match(DestinationMatch {
                 host: Some(DestinationMatchValue::String("status.example.com".into())),
                 path_prefix: None,
                 path_exact: Some("/status".into()),
@@ -1134,7 +1138,7 @@ mod tests {
         let prefix_destination = destination_with_match(
             "status_prefix",
             prefix_backend_addr,
-            Some(DestinationMatch {
+            single_match(DestinationMatch {
                 host: Some(DestinationMatchValue::String("status.example.com".into())),
                 path_prefix: Some(DestinationMatchValue::String("/status".into())),
                 path_exact: None,
@@ -1204,8 +1208,18 @@ mod tests {
             server_addr,
             false,
             vec![
-                destination_with_match("v1", v1_backend_addr, Some(regex_match("/v1")), false),
-                destination_with_match("v2", v2_backend_addr, Some(regex_match("/v2")), false),
+                destination_with_match(
+                    "v1",
+                    v1_backend_addr,
+                    single_match(regex_match("/v1")),
+                    false,
+                ),
+                destination_with_match(
+                    "v2",
+                    v2_backend_addr,
+                    single_match(regex_match("/v2")),
+                    false,
+                ),
                 destination_with_match("fallback", fallback_backend_addr, None, true),
             ],
         );
@@ -1265,7 +1279,7 @@ mod tests {
         let first_destination = destination_with_match(
             "reports_a_regex",
             first_backend_addr,
-            Some(DestinationMatch {
+            single_match(DestinationMatch {
                 host: None,
                 path_prefix: Some(DestinationMatchValue::Regex {
                     regex: "^/reports/.*".into(),
@@ -1278,7 +1292,7 @@ mod tests {
         let second_destination = destination_with_match(
             "reports_b_prefix",
             second_backend_addr,
-            Some(DestinationMatch {
+            single_match(DestinationMatch {
                 host: None,
                 path_prefix: Some(DestinationMatchValue::String("/reports".into())),
                 path_exact: None,
@@ -1383,7 +1397,7 @@ mod tests {
         let billing_destination = destination_with_match(
             "billing",
             billing_backend_addr,
-            Some(DestinationMatch {
+            single_match(DestinationMatch {
                 host: Some(DestinationMatchValue::String("billing.example.com".into())),
                 path_prefix: Some(DestinationMatchValue::String("/billing".into())),
                 path_exact: None,
@@ -1394,7 +1408,7 @@ mod tests {
         let support_destination = destination_with_match(
             "support",
             support_backend_addr,
-            Some(DestinationMatch {
+            single_match(DestinationMatch {
                 host: Some(DestinationMatchValue::String("support.example.com".into())),
                 path_prefix: Some(DestinationMatchValue::String("/support".into())),
                 path_exact: None,

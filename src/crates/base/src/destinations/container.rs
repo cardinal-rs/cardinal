@@ -90,7 +90,11 @@ impl Provider for DestinationContainer {
         let mut wrappers: Vec<Arc<DestinationWrapper>> = Vec::new();
 
         for (key, destination) in ctx.config.destinations.clone() {
-            let has_match = destination.r#match.is_some();
+            let has_match = destination
+                .r#match
+                .as_ref()
+                .map(|entries| !entries.is_empty())
+                .unwrap_or(false);
             let router = destination
                 .routes
                 .iter()
@@ -247,11 +251,11 @@ mod tests {
             url: format!("https://{name}.internal"),
             health_check: None,
             default,
-            r#match: Some(DestinationMatch {
+            r#match: Some(vec![DestinationMatch {
                 host,
                 path_prefix,
                 path_exact: path_exact.map(|s| s.to_string()),
-            }),
+            }]),
             routes: Vec::new(),
             middleware: Vec::new(),
         }
@@ -263,7 +267,11 @@ mod tests {
         let mut wrappers = Vec::new();
 
         for (key, destination) in entries {
-            let has_match = destination.r#match.is_some();
+            let has_match = destination
+                .r#match
+                .as_ref()
+                .map(|entries| !entries.is_empty())
+                .unwrap_or(false);
             let wrapper = Arc::new(DestinationWrapper::new(destination, None));
             if wrapper.destination.default {
                 default_destination = Some(wrapper.clone());

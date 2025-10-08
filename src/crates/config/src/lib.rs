@@ -121,7 +121,7 @@ pub struct Destination {
     #[serde(default)]
     pub default: bool,
     #[serde(default)]
-    pub r#match: Option<DestinationMatch>,
+    pub r#match: Option<Vec<DestinationMatch>>,
     #[serde(default)]
     pub routes: Vec<Route>,
     #[serde(default)]
@@ -384,13 +384,17 @@ path = "plugins/ratelimit.wasm"
 name = "customer_service"
 url = "https://svc.internal/api"
 
-[match]
+[[match]]
 host = "support.example.com"
 path_prefix = "/helpdesk"
 "#;
 
         let customer: Destination = toml::from_str(string_toml).unwrap();
-        let matcher = customer.r#match.as_ref().expect("expected match section");
+        let matcher = customer
+            .r#match
+            .as_ref()
+            .and_then(|entries| entries.first())
+            .expect("expected match section");
         assert_eq!(
             matcher.host,
             Some(DestinationMatchValue::String("support.example.com".into()))
@@ -405,13 +409,17 @@ path_prefix = "/helpdesk"
 name = "billing"
 url = "https://billing.internal"
 
-[match]
+[[match]]
 host = { regex = '^api\.(eu|us)\.example\.com$' }
 path_prefix = { regex = '^/billing/(v\d+)/' }
 "#;
 
         let billing: Destination = toml::from_str(regex_toml).unwrap();
-        let matcher = billing.r#match.as_ref().expect("expected match section");
+        let matcher = billing
+            .r#match
+            .as_ref()
+            .and_then(|entries| entries.first())
+            .expect("expected match section");
         assert_eq!(
             matcher.host,
             Some(DestinationMatchValue::Regex {
@@ -439,12 +447,19 @@ path_prefix = { regex = '^/billing/(v\d+)/' }
             name: String,
             url: String,
             #[serde(rename = "match")]
-            matcher: Option<DestinationMatch>,
+            matcher: Option<Vec<DestinationMatch>>,
         }
 
         impl DestinationHarness {
-            fn matcher(&self) -> &DestinationMatch {
-                self.matcher.as_ref().expect("matcher section present")
+            fn first_match(&self) -> &DestinationMatch {
+                self.matcher
+                    .as_ref()
+                    .and_then(|entries| entries.first())
+                    .expect("matcher section present")
+            }
+
+            fn match_count(&self) -> usize {
+                self.matcher.as_ref().map(|m| m.len()).unwrap_or(0)
             }
         }
 
@@ -453,44 +468,57 @@ path_prefix = { regex = '^/billing/(v\d+)/' }
 name = "customer_service"
 url = "https://svc.internal/api"
 
-[destinations.customer_service.match]
+[[destinations.customer_service.match]]
 host = "support.example.com"
 path_prefix = "/helpdesk"
+
+[[destinations.customer_service.match]]
+host = "support.example.com"
+path_prefix = { regex = '^/support' }
 
 [destinations.billing]
 name = "billing"
 url = "https://billing.internal"
 
-[destinations.billing.match]
+[[destinations.billing.match]]
 host = { regex = '^api\.(eu|us)\.example\.com$' }
 path_prefix = { regex = '^/billing/(v\d+)/' }
 "#;
 
         let parsed: ConfigHarness = toml::from_str(toml_source).unwrap();
 
-        let customer = parsed
-            .destinations
-            .get("customer_service")
-            .unwrap()
-            .matcher();
+        let customer = parsed.destinations.get("customer_service").unwrap();
+        assert_eq!(customer.match_count(), 2);
+        let customer_match = customer.first_match();
         assert_eq!(
-            customer.host,
+            customer_match.host,
             Some(DestinationMatchValue::String("support.example.com".into()))
         );
         assert_eq!(
-            customer.path_prefix,
+            customer_match.path_prefix,
             Some(DestinationMatchValue::String("/helpdesk".into()))
         );
 
-        let billing = parsed.destinations.get("billing").unwrap().matcher();
+        let customer_matches = customer.matcher.as_ref().unwrap();
+        let second = &customer_matches[1];
         assert_eq!(
-            billing.host,
+            second.path_prefix,
+            Some(DestinationMatchValue::Regex {
+                regex: String::from("^/support"),
+            })
+        );
+
+        let billing = parsed.destinations.get("billing").unwrap();
+        assert_eq!(billing.match_count(), 1);
+        let billing_match = billing.first_match();
+        assert_eq!(
+            billing_match.host,
             Some(DestinationMatchValue::Regex {
                 regex: r"^api\.(eu|us)\.example\.com$".into()
             })
         );
         assert_eq!(
-            billing.path_prefix,
+            billing_match.path_prefix,
             Some(DestinationMatchValue::Regex {
                 regex: r"^/billing/(v\d+)/".into()
             })

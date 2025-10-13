@@ -7,7 +7,7 @@ use crate::utils::requests::{
 use bytes::Bytes;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationContainer;
-use cardinal_plugins::request_context::RequestContext;
+use cardinal_plugins::request_context::{RequestContext, RequestContextBase};
 use cardinal_plugins::runner::MiddlewareResult;
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
@@ -35,6 +35,8 @@ pub trait CardinalContextProvider: Send + Sync {
     fn health_check(&self, _session: &Session) -> HealthCheckStatus {
         HealthCheckStatus::None
     }
+
+    fn logging(&self, _session: &mut Session, _e: Option<&Error>, _ctx: &mut RequestContextBase) {}
 }
 
 #[derive(Clone)]
@@ -99,10 +101,17 @@ impl CardinalProxyBuilder {
 
 #[async_trait::async_trait]
 impl ProxyHttp for CardinalProxy {
-    type CTX = Option<RequestContext>;
+    type CTX = RequestContextBase;
 
     fn new_ctx(&self) -> Self::CTX {
-        None
+        RequestContextBase::default()
+    }
+
+    async fn logging(&self, _session: &mut Session, _e: Option<&Error>, ctx: &mut Self::CTX)
+    where
+        Self::CTX: Send + Sync,
+    {
+        self.provider.logging(_session, _e, ctx);
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
@@ -195,11 +204,11 @@ impl ProxyHttp for CardinalProxy {
             }
         };
 
-        *ctx = Some(request_state);
+        ctx.set_resolved_request(request_state);
 
         match res {
             MiddlewareResult::Continue(resp_headers) => {
-                ctx.as_mut().unwrap().response_headers = Some(resp_headers);
+                ctx.resolved_request.as_mut().unwrap().response_headers = Some(resp_headers);
 
                 Ok(false)
             }
@@ -212,34 +221,30 @@ impl ProxyHttp for CardinalProxy {
         _session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        if let Some(state) = ctx.as_ref() {
-            // Determine origin parts for TLS and SNI
-            let (host, port, is_tls) = parse_origin(&state.backend.destination.url)
-                .map_err(|_| Error::new_str("Origin could not be parsed "))?;
-            let hostport = format!("{host}:{port}");
+        // Determine origin parts for TLS and SNI
+        let (host, port, is_tls) = parse_origin(&ctx.req_unsafe().backend.destination.url)
+            .map_err(|_| Error::new_str("Origin could not be parsed "))?;
+        let hostport = format!("{host}:{port}");
 
-            // Compose full upstream URL for logging with normalized scheme
-            let path_and_query = _session
-                .req_header()
-                .uri
-                .path_and_query()
-                .map(|pq| pq.as_str())
-                .unwrap_or("/");
-            let upstream_url = compose_upstream_url(is_tls, &host, port, path_and_query);
+        // Compose full upstream URL for logging with normalized scheme
+        let path_and_query = _session
+            .req_header()
+            .uri
+            .path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or("/");
+        let upstream_url = compose_upstream_url(is_tls, &host, port, path_and_query);
 
-            info!(%upstream_url, backend_id = %state.backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
-            debug!(upstream_origin = %hostport, "Connecting to upstream origin");
+        info!(%upstream_url, backend_id = %ctx.req_unsafe().backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
+        debug!(upstream_origin = %hostport, "Connecting to upstream origin");
 
-            let mut peer = HttpPeer::new(&hostport, is_tls, host);
-            if let Some(opts) = peer.get_mut_peer_options() {
-                // Allow both HTTP/1.1 and HTTP/2 so plain HTTP backends keep working.
-                opts.set_http_version(2, 1);
-            }
-            let peer = Box::new(peer);
-            Ok(peer)
-        } else {
-            Err(Error::new(ErrorType::InternalError))
+        let mut peer = HttpPeer::new(&hostport, is_tls, host);
+        if let Some(opts) = peer.get_mut_peer_options() {
+            // Allow both HTTP/1.1 and HTTP/2 so plain HTTP backends keep working.
+            opts.set_http_version(2, 1);
         }
+        let peer = Box::new(peer);
+        Ok(peer)
     }
 
     async fn connected_to_upstream(
@@ -252,10 +257,8 @@ impl ProxyHttp for CardinalProxy {
         _digest: Option<&Digest>,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
-        let backend_id = ctx
-            .as_ref()
-            .map(|b| b.backend.destination.name.as_str())
-            .unwrap_or("<unknown>");
+        let backend_id = ctx.req_unsafe().backend.destination.name.to_string();
+
         info!(backend_id, reused, peer = %peer, "Connected to upstream");
         Ok(())
     }
@@ -266,35 +269,35 @@ impl ProxyHttp for CardinalProxy {
         upstream_response: &mut ResponseHeader,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
-        if let Some(state) = ctx.as_mut() {
-            if let Some(resp_headers) = state.response_headers.take() {
-                for (key, val) in resp_headers {
-                    let _ = upstream_response.insert_header(key, val);
-                }
+        if let Some(resp_headers) = ctx.req_unsafe_mut().response_headers.take() {
+            for (key, val) in resp_headers {
+                let _ = upstream_response.insert_header(key, val);
             }
+        }
 
-            let runner = state.plugin_runner.clone();
+        let req = ctx.req_unsafe_mut();
 
-            runner
-                .run_response_filters(session, state, upstream_response)
-                .await;
+        let runner = req.plugin_runner.clone();
 
-            if !state.cardinal_context.config.server.log_upstream_response {
-                return Ok(());
-            }
+        runner
+            .run_response_filters(session, req, upstream_response)
+            .await;
 
-            let status = upstream_response.status.as_u16();
-            let location = upstream_response
-                .headers
-                .get("location")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            let backend_id = &state.backend.destination.name;
-            if let Some(loc) = location {
-                info!(backend_id, status, location = %loc, "Upstream responded");
-            } else {
-                info!(backend_id, status, "Upstream responded");
-            }
+        if !req.cardinal_context.config.server.log_upstream_response {
+            return Ok(());
+        }
+
+        let status = upstream_response.status.as_u16();
+        let location = upstream_response
+            .headers
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let backend_id = &req.backend.destination.name;
+        if let Some(loc) = location {
+            info!(backend_id, status, location = %loc, "Upstream responded");
+        } else {
+            info!(backend_id, status, "Upstream responded");
         }
 
         Ok(())

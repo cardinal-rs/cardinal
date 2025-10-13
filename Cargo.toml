@@ -5,7 +5,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.29"
+version = "0.2.30"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/andrespirela/cardinal"
@@ -26,6 +26,7 @@ tracing-subscriber = "0.3"
 matchit = "0.8.6"
 derive_builder = "0.20.2"
 url = "2.5.7"
+chrono = { version = "0.4.42"}
 
 #[patch.crates-io]
 #sfv = { git = "https://github.com/undef1nd/sfv.git", tag = "v0.9.4" }

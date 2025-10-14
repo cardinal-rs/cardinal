@@ -7,6 +7,7 @@ use chrono::Utc;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 pub struct RequestContext {
     pub cardinal_context: Arc<CardinalContext>,
@@ -44,6 +45,7 @@ impl RequestContext {
 pub struct RequestContextBase {
     pub resolved_request: Option<RequestContext>,
     pub metadata: HashMap<String, String>,
+    pub req_instant: Instant
 }
 
 impl Default for RequestContextBase {
@@ -57,6 +59,7 @@ impl RequestContextBase {
         Self {
             resolved_request: None,
             metadata: Self::init_metadata(),
+            req_instant: Instant::now(),
         }
     }
 

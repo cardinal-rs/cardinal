@@ -31,7 +31,15 @@ pub enum HealthCheckStatus {
 }
 
 pub trait CardinalContextProvider: Send + Sync {
-    fn resolve(&self, session: &Session) -> Option<Arc<CardinalContext>>;
+    fn ctx(&self) -> RequestContextBase {
+        RequestContextBase::default()
+    }
+
+    fn resolve(
+        &self,
+        session: &Session,
+        ctx: &mut RequestContextBase,
+    ) -> Option<Arc<CardinalContext>>;
     fn health_check(&self, _session: &Session) -> HealthCheckStatus {
         HealthCheckStatus::None
     }
@@ -51,7 +59,11 @@ impl StaticContextProvider {
 }
 
 impl CardinalContextProvider for StaticContextProvider {
-    fn resolve(&self, _session: &Session) -> Option<Arc<CardinalContext>> {
+    fn resolve(
+        &self,
+        _session: &Session,
+        _ctx: &mut RequestContextBase,
+    ) -> Option<Arc<CardinalContext>> {
         Some(self.context.clone())
     }
 }
@@ -104,7 +116,7 @@ impl ProxyHttp for CardinalProxy {
     type CTX = RequestContextBase;
 
     fn new_ctx(&self) -> Self::CTX {
-        RequestContextBase::default()
+        self.provider.ctx()
     }
 
     async fn logging(&self, _session: &mut Session, _e: Option<&Error>, ctx: &mut Self::CTX)
@@ -152,7 +164,7 @@ impl ProxyHttp for CardinalProxy {
             }
         }
 
-        let context = match self.provider.resolve(session) {
+        let context = match self.provider.resolve(session, ctx) {
             Some(ctx) => ctx,
             None => {
                 warn!(%path, "No context found for request host");

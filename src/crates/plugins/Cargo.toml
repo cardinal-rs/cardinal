@@ -13,10 +13,10 @@ categories = ["network-programming", "development-tools"]
 [dependencies]
 parking_lot.workspace = true
 pingora = { workspace = true, features = ["openssl"] }
-cardinal-base = { path = "../base", version = "0.2.32" }
-cardinal-errors = { path = "../errors", version = "0.2.32" }
-cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.32" }
-cardinal-config = { path = "../config", version = "0.2.32" }
+cardinal-base = { path = "../base", version = "0.2.33" }
+cardinal-errors = { path = "../errors", version = "0.2.33" }
+cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.33" }
+cardinal-config = { path = "../config", version = "0.2.33" }
 async-trait.workspace = true
 tracing.workspace = true
 form_urlencoded = "1.2.2"

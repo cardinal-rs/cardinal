@@ -45,7 +45,7 @@ impl RequestContext {
 pub struct RequestContextBase {
     pub resolved_request: Option<RequestContext>,
     pub metadata: HashMap<String, String>,
-    pub req_instant: Instant
+    pub req_instant: Instant,
 }
 
 impl Default for RequestContextBase {

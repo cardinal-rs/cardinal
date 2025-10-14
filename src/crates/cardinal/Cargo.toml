@@ -11,11 +11,11 @@ keywords = ["gateway", "reverse-proxy", "pingora"]
 categories = ["network-programming", "web-programming::http-server"]
 
 [dependencies]
-cardinal-base = { path = "../base", version = "0.2.31" }
-cardinal-config = { path = "../config", version = "0.2.31" }
-cardinal-errors = { path = "../errors", version = "0.2.31" }
-cardinal-proxy = { path = "../proxy", version = "0.2.31" }
-cardinal-plugins = { path = "../plugins", version = "0.2.31" }
+cardinal-base = { path = "../base", version = "0.2.32" }
+cardinal-config = { path = "../config", version = "0.2.32" }
+cardinal-errors = { path = "../errors", version = "0.2.32" }
+cardinal-proxy = { path = "../proxy", version = "0.2.32" }
+cardinal-plugins = { path = "../plugins", version = "0.2.32" }
 tracing.workspace = true
 pingora.workspace = true
 tokio.workspace = true
@@ -23,5 +23,5 @@ tokio.workspace = true
 [dev-dependencies]
 tiny_http = "0.12.0"
 ureq = "3.1.2"
-cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.31" }
+cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.32" }
 async-trait.workspace = true

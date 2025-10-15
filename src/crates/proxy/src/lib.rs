@@ -288,13 +288,29 @@ impl ProxyHttp for CardinalProxy {
         }
 
         {
+            // Run response filters first
+            {
+                let runner = {
+                    let req = ctx.req_unsafe_mut();
+                    req.plugin_runner.clone()
+                };
+
+                runner
+                    .run_response_filters(
+                        session,
+                        {
+                            let req = ctx.req_unsafe_mut();
+                            req
+                        },
+                        upstream_response,
+                    )
+                    .await;
+            }
+
+            ctx.set("status", upstream_response.status.as_str());
+
+            // Safe to get another mutable reference now
             let req = ctx.req_unsafe_mut();
-
-            let runner = req.plugin_runner.clone();
-
-            runner
-                .run_response_filters(session, req, upstream_response)
-                .await;
 
             if !req.cardinal_context.config.server.log_upstream_response {
                 return Ok(());
@@ -305,16 +321,14 @@ impl ProxyHttp for CardinalProxy {
                 .headers
                 .get("location")
                 .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
+                .map(str::to_string);
             let backend_id = &req.backend.destination.name;
-            if let Some(loc) = location {
-                info!(backend_id, status, location = %loc, "Upstream responded");
-            } else {
-                info!(backend_id, status, "Upstream responded");
+
+            match location {
+                Some(loc) => info!(backend_id, status, location = %loc, "Upstream responded"),
+                None => info!(backend_id, status, "Upstream responded"),
             }
         }
-
-        ctx.set("status", upstream_response.status.as_str());
 
         Ok(())
     }

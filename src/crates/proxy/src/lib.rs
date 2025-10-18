@@ -1,5 +1,9 @@
+mod req;
+mod retry;
 mod utils;
 
+use crate::req::ReqCtx;
+use crate::retry::RetryState;
 use crate::utils::requests::{
     compose_upstream_url, execution_context_from_request, parse_origin, rewrite_request_path,
     set_upstream_host_headers,
@@ -7,6 +11,7 @@ use crate::utils::requests::{
 use bytes::Bytes;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationContainer;
+use cardinal_config::DestinationRetryBackoffType;
 use cardinal_plugins::request_context::{RequestContext, RequestContextBase};
 use cardinal_plugins::runner::MiddlewareResult;
 use pingora::http::ResponseHeader;
@@ -14,6 +19,7 @@ use pingora::prelude::*;
 use pingora::protocols::Digest;
 use pingora::upstreams::peer::Peer;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 pub mod pingora {
@@ -31,20 +37,16 @@ pub enum HealthCheckStatus {
 }
 
 pub trait CardinalContextProvider: Send + Sync {
-    fn ctx(&self) -> RequestContextBase {
-        RequestContextBase::default()
+    fn ctx(&self) -> ReqCtx {
+        ReqCtx::default()
     }
 
-    fn resolve(
-        &self,
-        session: &Session,
-        ctx: &mut RequestContextBase,
-    ) -> Option<Arc<CardinalContext>>;
+    fn resolve(&self, session: &Session, ctx: &mut ReqCtx) -> Option<Arc<CardinalContext>>;
     fn health_check(&self, _session: &Session) -> HealthCheckStatus {
         HealthCheckStatus::None
     }
 
-    fn logging(&self, _session: &mut Session, _e: Option<&Error>, _ctx: &mut RequestContextBase) {}
+    fn logging(&self, _session: &mut Session, _e: Option<&Error>, _ctx: &mut ReqCtx) {}
 }
 
 #[derive(Clone)]
@@ -59,11 +61,7 @@ impl StaticContextProvider {
 }
 
 impl CardinalContextProvider for StaticContextProvider {
-    fn resolve(
-        &self,
-        _session: &Session,
-        _ctx: &mut RequestContextBase,
-    ) -> Option<Arc<CardinalContext>> {
+    fn resolve(&self, _session: &Session, _ctx: &mut ReqCtx) -> Option<Arc<CardinalContext>> {
         Some(self.context.clone())
     }
 }
@@ -113,7 +111,7 @@ impl CardinalProxyBuilder {
 
 #[async_trait::async_trait]
 impl ProxyHttp for CardinalProxy {
-    type CTX = RequestContextBase;
+    type CTX = ReqCtx;
 
     fn new_ctx(&self) -> Self::CTX {
         self.provider.ctx()
@@ -220,7 +218,11 @@ impl ProxyHttp for CardinalProxy {
 
         match res {
             MiddlewareResult::Continue(resp_headers) => {
-                ctx.resolved_request.as_mut().unwrap().response_headers = Some(resp_headers);
+                ctx.ctx_base
+                    .resolved_request
+                    .as_mut()
+                    .unwrap()
+                    .response_headers = Some(resp_headers);
 
                 Ok(false)
             }
@@ -228,13 +230,38 @@ impl ProxyHttp for CardinalProxy {
         }
     }
 
+    fn fail_to_connect(
+        &self,
+        _session: &mut Session,
+        _peer: &HttpPeer,
+        ctx: &mut Self::CTX,
+        mut e: Box<Error>,
+    ) -> Box<Error> {
+        let backend_config = ctx.req_unsafe().backend.destination.retry.clone();
+        if let Some(retry_state) = ctx.retry_state.as_mut() {
+            retry_state.register_attempt();
+        } else {
+            if let Some(retry_config) = backend_config {
+                ctx.retry_state = Some(RetryState::from(retry_config));
+                e.set_retry(true);
+            }
+        }
+
+        e
+    }
+
     async fn upstream_peer(
         &self,
         _session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
+        if let Some(retry_state) = ctx.retry_state.as_mut() {
+            retry_state.sleep_if_retry_allowed().await;
+        }
+
+        let backend = &ctx.req_unsafe().backend;
         // Determine origin parts for TLS and SNI
-        let (host, port, is_tls) = parse_origin(&ctx.req_unsafe().backend.destination.url)
+        let (host, port, is_tls) = parse_origin(&backend.destination.url)
             .map_err(|_| Error::new_str("Origin could not be parsed "))?;
         let hostport = format!("{host}:{port}");
 
@@ -247,13 +274,31 @@ impl ProxyHttp for CardinalProxy {
             .unwrap_or("/");
         let upstream_url = compose_upstream_url(is_tls, &host, port, path_and_query);
 
-        info!(%upstream_url, backend_id = %ctx.req_unsafe().backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
+        info!(%upstream_url, backend_id = %&backend.destination.name, is_tls, sni = %host, "Forwarding to upstream");
         debug!(upstream_origin = %hostport, "Connecting to upstream origin");
 
         let mut peer = HttpPeer::new(&hostport, is_tls, host);
         if let Some(opts) = peer.get_mut_peer_options() {
             // Allow both HTTP/1.1 and HTTP/2 so plain HTTP backends keep working.
             opts.set_http_version(2, 1);
+            if let Some(timeout) = &backend.destination.timeout {
+                opts.idle_timeout = timeout
+                    .idle
+                    .as_ref()
+                    .map(|idle| Duration::from_millis(*idle));
+                opts.write_timeout = timeout
+                    .write
+                    .as_ref()
+                    .map(|idle| Duration::from_millis(*idle));
+                opts.total_connection_timeout = timeout
+                    .connect
+                    .as_ref()
+                    .map(|idle| Duration::from_millis(*idle));
+                opts.read_timeout = timeout
+                    .read
+                    .as_ref()
+                    .map(|idle| Duration::from_millis(*idle));
+            }
         }
         let peer = Box::new(peer);
         Ok(peer)
@@ -269,6 +314,7 @@ impl ProxyHttp for CardinalProxy {
         _digest: Option<&Digest>,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
+        ctx.retry_state = None;
         let backend_id = ctx.req_unsafe().backend.destination.name.to_string();
 
         info!(backend_id, reused, peer = %peer, "Connected to upstream");

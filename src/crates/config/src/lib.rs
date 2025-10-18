@@ -123,6 +123,38 @@ pub struct DestinationMatch {
     pub path_exact: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder, TS, Default)]
+#[ts(export)]
+pub struct DestinationTimeouts {
+    pub connect: Option<u64>,
+    pub read: Option<u64>,
+    pub write: Option<u64>,
+    pub idle: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub enum DestinationRetryBackoffType {
+    Exponential,
+    Linear,
+    None,
+}
+
+impl Default for DestinationRetryBackoffType {
+    fn default() -> Self {
+        DestinationRetryBackoffType::None
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder, TS, Default)]
+#[ts(export)]
+pub struct DestinationRetry {
+    pub max_attempts: u64,
+    pub interval_ms: u64,
+    pub backoff_type: DestinationRetryBackoffType,
+    pub max_interval: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]
 #[ts(export)]
 pub struct Destination {
@@ -137,6 +169,10 @@ pub struct Destination {
     pub routes: Vec<Route>,
     #[serde(default)]
     pub middleware: Vec<Middleware>,
+    #[serde(default)]
+    pub timeout: Option<DestinationTimeouts>,
+    #[serde(default)]
+    pub retry: Option<DestinationRetry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Builder, TS)]

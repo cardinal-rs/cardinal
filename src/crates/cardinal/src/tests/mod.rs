@@ -10,7 +10,7 @@ mod tests {
     use cardinal_base::provider::ProviderScope;
     use cardinal_config::{
         load_config, CardinalConfig, Destination, DestinationMatch, DestinationMatchValue,
-        DestinationRetry, DestinationRetryBackoffType, ServerConfig,
+        DestinationRetry, DestinationRetryBackoffType, DestinationTimeouts, ServerConfig,
     };
     use cardinal_errors::CardinalError;
     use cardinal_plugins::container::{PluginBuiltInType, PluginContainer, PluginHandler};
@@ -106,6 +106,17 @@ mod tests {
     ) -> CardinalConfig {
         let mut destination = destination_with_match("retry", backend_addr, None, true);
         destination.retry = Some(retry);
+
+        config_with_destinations(server_addr, true, vec![destination])
+    }
+
+    fn timeout_test_config(
+        server_addr: &str,
+        backend_addr: &str,
+        timeouts: DestinationTimeouts,
+    ) -> CardinalConfig {
+        let mut destination = destination_with_match("timeout", backend_addr, None, true);
+        destination.timeout = Some(timeouts);
 
         config_with_destinations(server_addr, true, vec![destination])
     }
@@ -1855,6 +1866,105 @@ mod tests {
             assert!(guard.is_some());
             guard.take();
         }
+    }
+
+    #[tokio::test]
+    async fn timeout_read_exceeded_returns_error() {
+        let server_addr = "127.0.0.1:1960";
+        let backend_addr = "127.0.0.1:9860";
+
+        let config = timeout_test_config(
+            server_addr,
+            backend_addr,
+            DestinationTimeouts {
+                read: Some(150),
+                connect: None,
+                write: None,
+                idle: None,
+            },
+        );
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            backend_addr,
+            vec![Route::new(Method::Get, "/resource", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(400));
+                let response = Response::from_string("slow-response");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let start = Instant::now();
+        let err = ureq::get(&http_url(server_addr, "/timeout/resource"))
+            .call()
+            .expect_err("expected upstream read timeout");
+        let elapsed = start.elapsed();
+
+        assert!(backend_hits.load(Ordering::SeqCst) >= 1);
+        assert!(elapsed >= Duration::from_millis(120));
+        assert!(elapsed <= Duration::from_millis(800));
+        assert!(
+            matches!(
+                err,
+                UreqError::StatusCode(504)
+                    | UreqError::StatusCode(502)
+                    | UreqError::ConnectionFailed
+                    | UreqError::Io(_)
+            ),
+            "unexpected error variant: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_read_within_limit_succeeds() {
+        let server_addr = "127.0.0.1:1961";
+        let backend_addr = "127.0.0.1:9861";
+
+        let config = timeout_test_config(
+            server_addr,
+            backend_addr,
+            DestinationTimeouts {
+                read: Some(800),
+                connect: None,
+                write: None,
+                idle: None,
+            },
+        );
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            backend_addr,
+            vec![Route::new(Method::Get, "/resource", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(200));
+                let response = Response::from_string("timely-response");
+                let _ = request.respond(response);
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let start = Instant::now();
+        let mut response = ureq::get(&http_url(server_addr, "/timeout/resource"))
+            .call()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(elapsed >= Duration::from_millis(200));
+        assert!(elapsed < Duration::from_millis(600));
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "timely-response");
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
     }
 
     fn spawn_cardinal(cardinal: Cardinal) -> JoinHandle<()> {

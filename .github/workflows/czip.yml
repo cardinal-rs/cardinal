@@ -9,6 +9,16 @@ on:
         description: 'Crate name to publish (optional)'
         required: false
         type: string
+      skip_crate_publish:
+        description: 'Skip publishing the crate (workflow_dispatch only)'
+        required: false
+        type: boolean
+        default: false
+      skip_npm_publish:
+        description: 'Skip publishing to npm (workflow_dispatch only)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   publish-crate:
@@ -16,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'release' && github.event.release.draft == false && github.event.release.prerelease == false)
-      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'workflow_dispatch' && inputs.skip_crate_publish != 'true')
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       CRATE_NAME: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.crate || 'cardinal-zip' }}
@@ -60,8 +70,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: publish-crate
     if: |
-      (github.event_name == 'release' && github.event.release.draft == false && github.event.release.prerelease == false)
-      || github.event_name == 'workflow_dispatch'
+      (
+        (github.event_name == 'release' && github.event.release.draft == false && github.event.release.prerelease == false)
+        || github.event_name == 'workflow_dispatch'
+      )
+      && (needs.publish-crate.result == 'success' || needs.publish-crate.result == 'skipped')
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -97,6 +110,7 @@ jobs:
       || github.event_name == 'workflow_dispatch'
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      SKIP_NPM_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_npm_publish || 'false' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -118,4 +132,9 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish package to npm
-        run: npm publish pkg-czip --access public
+        if: env.SKIP_NPM_PUBLISH != 'true'
+        run: npm publish ./pkg-czip --access public
+
+      - name: Dry run npm publish
+        if: env.SKIP_NPM_PUBLISH == 'true'
+        run: npm publish ./pkg-czip --access public --dry-run

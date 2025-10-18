@@ -238,12 +238,22 @@ impl ProxyHttp for CardinalProxy {
         mut e: Box<Error>,
     ) -> Box<Error> {
         let backend_config = ctx.req_unsafe().backend.destination.retry.clone();
-        if let Some(retry_state) = ctx.retry_state.as_mut() {
+        if let Some(mut retry_state) = ctx.retry_state.take() {
             retry_state.register_attempt();
-        } else {
-            if let Some(retry_config) = backend_config {
-                ctx.retry_state = Some(RetryState::from(retry_config));
+            if retry_state.can_retry() {
                 e.set_retry(true);
+                ctx.retry_state = Some(retry_state);
+            } else {
+                ctx.retry_state = None;
+            }
+        } else if let Some(retry_config) = backend_config {
+            let mut retry_state = RetryState::from(retry_config);
+            retry_state.register_attempt();
+            if retry_state.can_retry() {
+                e.set_retry(true);
+                ctx.retry_state = Some(retry_state);
+            } else {
+                ctx.retry_state = None;
             }
         }
 
@@ -256,7 +266,10 @@ impl ProxyHttp for CardinalProxy {
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
         if let Some(retry_state) = ctx.retry_state.as_mut() {
-            retry_state.sleep_if_retry_allowed().await;
+            if !retry_state.sleep_if_retry_allowed().await {
+                ctx.retry_state = None;
+                return Err(Error::new_str("Retry attempts exhausted"));
+            }
         }
 
         let backend = &ctx.req_unsafe().backend;

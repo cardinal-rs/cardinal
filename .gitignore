@@ -28,3 +28,5 @@ target
 /testing
 
 /src/crates/config/bindings
+
+/src/crates/czip/pkg-czip

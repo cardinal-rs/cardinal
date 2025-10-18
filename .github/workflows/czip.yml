@@ -1,0 +1,121 @@
+name: CZIP
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: 'Crate name to publish (optional)'
+        required: false
+        type: string
+
+jobs:
+  publish-crate:
+    name: Publish cardinal-zip crate
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'release' && github.event.release.draft == false && github.event.release.prerelease == false)
+      || github.event_name == 'workflow_dispatch'
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      CRATE_NAME: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.crate || 'cardinal-zip' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+
+      - name: Set up just runner
+        uses: extractions/setup-just@v2
+
+      - name: Install system dependencies
+        run: just ubuntu-essentials
+
+      - name: Publish crate to crates.io
+        run: |
+          set -euxo pipefail
+          crate="${CRATE_NAME}"
+          publish_output=""
+          if publish_output=$(cargo publish --package "$crate" --locked 2>&1); then
+            printf '%s\n' "$publish_output"
+            exit 0
+          fi
+
+          printf '%s\n' "$publish_output"
+          if printf '%s\n' "$publish_output" | grep -q "already exists"; then
+            echo "crate $crate already published, skipping"
+            exit 0
+          fi
+
+          exit 1
+
+  package-wasm:
+    name: Build wasm package
+    runs-on: ubuntu-latest
+    needs: publish-crate
+    if: |
+      (github.event_name == 'release' && github.event.release.draft == false && github.event.release.prerelease == false)
+      || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build wasm package
+        run: wasm-pack build src/crates/czip --release --target nodejs --out-dir "${{ github.workspace }}/pkg-czip" --scope cardinal-rs
+
+      - name: Upload wasm artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: czip-wasm-package
+          path: pkg-czip
+
+  publish-npm:
+    name: Publish npm package
+    runs-on: ubuntu-latest
+    needs: package-wasm
+    if: |
+      (github.event_name == 'release' && github.event.release.draft == false && github.event.release.prerelease == false)
+      || github.event_name == 'workflow_dispatch'
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download wasm artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: czip-wasm-package
+          path: pkg-czip
+
+      - name: Configure npm authentication
+        run: npm config set //registry.npmjs.org/:_authToken="${NPM_TOKEN}"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish package to npm
+        run: npm publish pkg-czip --access public

@@ -1,0 +1,25 @@
+[package]
+name = "cardinal-zip"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Utilities for building and serializing Cardinal CZip archives"
+keywords = ["cardinal", "czip", "archive", "wasm", "plugins"]
+categories = ["encoding", "wasm", "compression"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+toml = "0.9.8"
+tracing.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

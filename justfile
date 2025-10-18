@@ -12,6 +12,9 @@ cargo-test:
     just ubuntu-essentials
     cargo test --all-features
 
+cargo-czip-test:
+    wasm-pack test --node src/crates/czip
+
 ubuntu-essentials:
     sudo apt-get update
     sudo apt-get install -y \

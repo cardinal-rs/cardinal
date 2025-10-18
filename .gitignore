@@ -26,3 +26,5 @@ target
 /target
 
 /testing
+
+/src/crates/config/bindings

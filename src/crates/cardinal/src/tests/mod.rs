@@ -10,13 +10,14 @@ mod tests {
     use cardinal_base::provider::ProviderScope;
     use cardinal_config::{
         load_config, CardinalConfig, Destination, DestinationMatch, DestinationMatchValue,
-        ServerConfig,
+        DestinationRetry, DestinationRetryBackoffType, ServerConfig,
     };
     use cardinal_errors::CardinalError;
     use cardinal_plugins::container::{PluginBuiltInType, PluginContainer, PluginHandler};
     use cardinal_plugins::headers::CARDINAL_PARAMS_HEADER_BASE;
     use cardinal_plugins::request_context::{RequestContext, RequestContextBase};
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
+    use cardinal_proxy::req::ReqCtx;
     use cardinal_proxy::CardinalContextProvider;
     use cardinal_wasm_plugins::plugin::WasmPlugin;
     use cardinal_wasm_plugins::wasmer::AsStoreRef;
@@ -26,7 +27,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
     use std::thread::JoinHandle;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use tiny_http::{Method, Response};
     use tokio::sync::OnceCell;
     use ureq::Error as UreqError;
@@ -98,6 +99,17 @@ mod tests {
         }
     }
 
+    fn retry_test_config(
+        server_addr: &str,
+        backend_addr: &str,
+        retry: DestinationRetry,
+    ) -> CardinalConfig {
+        let mut destination = destination_with_match("retry", backend_addr, None, true);
+        destination.retry = Some(retry);
+
+        config_with_destinations(server_addr, true, vec![destination])
+    }
+
     fn destination_with_match(
         name: &str,
         url: &str,
@@ -112,6 +124,8 @@ mod tests {
             r#match: matcher,
             routes: vec![],
             middleware: vec![],
+            timeout: None,
+            retry: None,
         }
     }
 
@@ -1546,6 +1560,303 @@ mod tests {
         assert_eq!(resolves.load(Ordering::SeqCst), 1);
     }
 
+    #[tokio::test]
+    async fn retry_exponential_backoff_eventually_succeeds() {
+        let server_addr = "127.0.0.1:1950";
+        let backend_addr = "127.0.0.1:9850";
+
+        let config = retry_test_config(
+            server_addr,
+            backend_addr,
+            DestinationRetry {
+                max_attempts: 5,
+                interval_ms: 100,
+                backoff_type: DestinationRetryBackoffType::Exponential,
+                max_interval: None,
+            },
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_holder = Arc::new(Mutex::new(None));
+
+        {
+            let backend_addr = backend_addr.to_string();
+            let backend_holder = backend_holder.clone();
+            let backend_hits = backend_hits.clone();
+
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(1350));
+                let route_hits = backend_hits.clone();
+
+                let server = spawn_backend(
+                    backend_addr,
+                    vec![Route::new(Method::Get, "/resource", move |request| {
+                        route_hits.fetch_add(1, Ordering::SeqCst);
+                        let response = Response::from_string("retry-success");
+                        let _ = request.respond(response).unwrap();
+                    })],
+                );
+
+                *backend_holder.lock().unwrap() = Some(server);
+            });
+        }
+
+        let start = Instant::now();
+        let mut response = ureq::get(&http_url(server_addr, "/retry/resource"))
+            .call()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "retry-success");
+        assert!(elapsed >= Duration::from_millis(1200));
+        assert!(elapsed <= Duration::from_millis(2400));
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+
+        {
+            let mut guard = backend_holder.lock().unwrap();
+            assert!(guard.is_some());
+            guard.take();
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_respects_max_attempts_and_fails_when_backend_unavailable() {
+        let server_addr = "127.0.0.1:1951";
+        let backend_addr = "127.0.0.1:9851";
+
+        let config = retry_test_config(
+            server_addr,
+            backend_addr,
+            DestinationRetry {
+                max_attempts: 2,
+                interval_ms: 150,
+                backoff_type: DestinationRetryBackoffType::Exponential,
+                max_interval: None,
+            },
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let start = Instant::now();
+        let result = ureq::get(&http_url(server_addr, "/retry/resource")).call();
+        let elapsed = start.elapsed();
+
+        assert!(elapsed >= Duration::from_millis(140));
+        assert!(elapsed <= Duration::from_millis(650));
+
+        let err = result.expect_err("expected retry exhaustion error");
+        assert!(
+            matches!(
+                err,
+                UreqError::ConnectionFailed | UreqError::Io(_) | UreqError::StatusCode(502)
+            ),
+            "unexpected error variant: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_max_interval_caps_total_wait_time() {
+        let server_addr = "127.0.0.1:1952";
+        let backend_addr = "127.0.0.1:9852";
+
+        let config = retry_test_config(
+            server_addr,
+            backend_addr,
+            DestinationRetry {
+                max_attempts: 5,
+                interval_ms: 120,
+                backoff_type: DestinationRetryBackoffType::Exponential,
+                max_interval: Some(200),
+            },
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_holder = Arc::new(Mutex::new(None));
+
+        {
+            let backend_addr = backend_addr.to_string();
+            let backend_holder = backend_holder.clone();
+            let backend_hits = backend_hits.clone();
+
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(320));
+                let route_hits = backend_hits.clone();
+
+                let server = spawn_backend(
+                    backend_addr,
+                    vec![Route::new(Method::Get, "/resource", move |request| {
+                        route_hits.fetch_add(1, Ordering::SeqCst);
+                        let response = Response::from_string("retry-capped");
+                        let _ = request.respond(response).unwrap();
+                    })],
+                );
+
+                *backend_holder.lock().unwrap() = Some(server);
+            });
+        }
+
+        let start = Instant::now();
+        let mut response = ureq::get(&http_url(server_addr, "/retry/resource"))
+            .call()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "retry-capped");
+        assert!(elapsed >= Duration::from_millis(320));
+        assert!(elapsed <= Duration::from_millis(750));
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+
+        {
+            let mut guard = backend_holder.lock().unwrap();
+            assert!(guard.is_some());
+            guard.take();
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_linear_backoff_eventually_succeeds() {
+        let server_addr = "127.0.0.1:1953";
+        let backend_addr = "127.0.0.1:9853";
+
+        let config = retry_test_config(
+            server_addr,
+            backend_addr,
+            DestinationRetry {
+                max_attempts: 4,
+                interval_ms: 60,
+                backoff_type: DestinationRetryBackoffType::Linear,
+                max_interval: None,
+            },
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_holder = Arc::new(Mutex::new(None));
+
+        {
+            let backend_addr = backend_addr.to_string();
+            let backend_holder = backend_holder.clone();
+            let backend_hits = backend_hits.clone();
+
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(260));
+                let route_hits = backend_hits.clone();
+
+                let server = spawn_backend(
+                    backend_addr,
+                    vec![Route::new(Method::Get, "/resource", move |request| {
+                        route_hits.fetch_add(1, Ordering::SeqCst);
+                        let response = Response::from_string("retry-linear");
+                        let _ = request.respond(response).unwrap();
+                    })],
+                );
+
+                *backend_holder.lock().unwrap() = Some(server);
+            });
+        }
+
+        let start = Instant::now();
+        let mut response = ureq::get(&http_url(server_addr, "/retry/resource"))
+            .call()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "retry-linear");
+        assert!(elapsed >= Duration::from_millis(260));
+        assert!(elapsed <= Duration::from_millis(800));
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+
+        {
+            let mut guard = backend_holder.lock().unwrap();
+            assert!(guard.is_some());
+            guard.take();
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_without_backoff_retries_quickly() {
+        let server_addr = "127.0.0.1:1954";
+        let backend_addr = "127.0.0.1:9854";
+
+        let config = retry_test_config(
+            server_addr,
+            backend_addr,
+            DestinationRetry {
+                max_attempts: 3,
+                interval_ms: 80,
+                backoff_type: DestinationRetryBackoffType::None,
+                max_interval: None,
+            },
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_holder = Arc::new(Mutex::new(None));
+
+        {
+            let backend_addr = backend_addr.to_string();
+            let backend_holder = backend_holder.clone();
+            let backend_hits = backend_hits.clone();
+
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(130));
+                let route_hits = backend_hits.clone();
+
+                let server = spawn_backend(
+                    backend_addr,
+                    vec![Route::new(Method::Get, "/resource", move |request| {
+                        route_hits.fetch_add(1, Ordering::SeqCst);
+                        let response = Response::from_string("retry-none");
+                        let _ = request.respond(response).unwrap();
+                    })],
+                );
+
+                *backend_holder.lock().unwrap() = Some(server);
+            });
+        }
+
+        let start = Instant::now();
+        let mut response = ureq::get(&http_url(server_addr, "/retry/resource"))
+            .call()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "retry-none");
+        assert!(elapsed >= Duration::from_millis(130));
+        assert!(elapsed <= Duration::from_millis(500));
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+
+        {
+            let mut guard = backend_holder.lock().unwrap();
+            assert!(guard.is_some());
+            guard.take();
+        }
+    }
+
     fn spawn_cardinal(cardinal: Cardinal) -> JoinHandle<()> {
         std::thread::spawn(move || {
             cardinal.run().unwrap();
@@ -1567,11 +1878,7 @@ mod tests {
     }
 
     impl CardinalContextProvider for TestContextProvider {
-        fn resolve(
-            &self,
-            _session: &Session,
-            ctx: &mut RequestContextBase,
-        ) -> Option<Arc<CardinalContext>> {
+        fn resolve(&self, _session: &Session, ctx: &mut ReqCtx) -> Option<Arc<CardinalContext>> {
             self.resolve_count.fetch_add(1, Ordering::SeqCst);
             self.context.as_ref().map(Arc::clone)
         }

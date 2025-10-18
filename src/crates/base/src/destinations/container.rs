@@ -258,6 +258,8 @@ mod tests {
             }]),
             routes: Vec::new(),
             middleware: Vec::new(),
+            timeout: None,
+            retry: None,
         }
     }
 
@@ -388,6 +390,8 @@ mod tests {
             r#match: None,
             routes: Vec::new(),
             middleware: Vec::new(),
+            timeout: None,
+            retry: None,
         };
 
         entries.push(("fallback", default_destination));
@@ -432,6 +436,8 @@ mod tests {
                     r#match: None,
                     routes: Vec::new(),
                     middleware: Vec::new(),
+                    timeout: None,
+                    retry: None,
                 },
             ),
         ]);
@@ -464,6 +470,8 @@ mod tests {
                     r#match: None,
                     routes: Vec::new(),
                     middleware: Vec::new(),
+                    timeout: None,
+                    retry: None,
                 },
             ),
         ]);
@@ -510,6 +518,8 @@ mod tests {
                     r#match: None,
                     routes: Vec::new(),
                     middleware: Vec::new(),
+                    timeout: None,
+                    retry: None,
                 },
             ),
         ]);
@@ -554,6 +564,8 @@ mod tests {
                     r#match: None,
                     routes: Vec::new(),
                     middleware: Vec::new(),
+                    timeout: None,
+                    retry: None,
                 },
             ),
         ]);
@@ -600,6 +612,8 @@ mod tests {
                     r#match: None,
                     routes: Vec::new(),
                     middleware: Vec::new(),
+                    timeout: None,
+                    retry: None,
                 },
             ),
         ]);
@@ -676,6 +690,8 @@ mod tests {
                     r#match: None,
                     routes: Vec::new(),
                     middleware: Vec::new(),
+                    timeout: None,
+                    retry: None,
                 },
             ),
         ]);
@@ -733,6 +749,8 @@ mod tests {
                 r#match: None,
                 routes: Vec::new(),
                 middleware: Vec::new(),
+                timeout: None,
+                retry: None,
             },
         )]);
 
@@ -782,6 +800,8 @@ mod tests {
             ]),
             routes: Vec::new(),
             middleware: Vec::new(),
+            timeout: None,
+            retry: None,
         };
 
         let container = build_container(vec![("shared", destination)]);
@@ -811,6 +831,8 @@ mod tests {
             r#match: None,
             routes: Vec::new(),
             middleware: Vec::new(),
+            timeout: None,
+            retry: None,
         };
 
         let container = build_container(vec![("segment", destination)]);
@@ -830,6 +852,8 @@ mod tests {
             r#match: None,
             routes: Vec::new(),
             middleware: Vec::new(),
+            timeout: None,
+            retry: None,
         };
 
         let container = build_container(vec![("api", destination)]);

@@ -1,5 +1,5 @@
-mod req;
-mod retry;
+pub mod req;
+pub mod retry;
 mod utils;
 
 use crate::req::ReqCtx;

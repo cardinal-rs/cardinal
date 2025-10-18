@@ -42,9 +42,7 @@ impl From<DestinationRetry> for RetryState {
 
         RetryState {
             current_attempt: 0,
-            max_attempts: value
-                .max_attempts
-                .min(u32::MAX as u64) as u32,
+            max_attempts: value.max_attempts.min(u32::MAX as u64) as u32,
             base_interval,
             last_attempt_at: None,
             next_delay: initial_delay,

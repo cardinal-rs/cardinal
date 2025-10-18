@@ -255,6 +255,8 @@ mod tests {
             r#match: matchers,
             routes: Vec::new(),
             middleware: Vec::new(),
+            timeout: None,
+            retry: None,
         };
 
         Arc::new(DestinationWrapper::new(destination, None))

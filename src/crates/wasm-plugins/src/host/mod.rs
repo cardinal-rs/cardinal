@@ -98,9 +98,7 @@ fn register_import(
     import: &dyn HostImport,
 ) {
     let namespace = import.namespace().to_string();
-    let exports = namespaces
-        .entry(namespace.clone())
-        .or_insert_with(Exports::new);
+    let exports = namespaces.entry(namespace.clone()).or_default();
     let function = import.build(store, env);
     exports.insert(import.name(), function);
 }

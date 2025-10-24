@@ -1,6 +1,7 @@
 use crate::retry::RetryState;
 use cardinal_plugins::request_context::{RequestContext, RequestContextBase};
 
+#[derive(Default)]
 pub struct ReqCtx {
     pub ctx_base: RequestContextBase,
     pub retry_state: Option<RetryState>,
@@ -21,14 +22,5 @@ impl ReqCtx {
 
     pub fn set(&mut self, key: &str, value: &str) {
         self.ctx_base.set(key, value);
-    }
-}
-
-impl Default for ReqCtx {
-    fn default() -> Self {
-        Self {
-            ctx_base: RequestContextBase::default(),
-            retry_state: None,
-        }
     }
 }

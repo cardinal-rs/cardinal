@@ -78,7 +78,7 @@ impl InstancePool {
 
         let handle = instance
             .exports
-            .get_typed_function::<(i32, i32), i32>(&mut store, self.plugin.handle_name.as_str())
+            .get_typed_function::<(i32, i32), i32>(&store, self.plugin.handle_name.as_str())
             .map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                     "missing `{}` export {e}",
@@ -88,7 +88,7 @@ impl InstancePool {
 
         let allocator = instance
             .exports
-            .get_typed_function::<(i32, i32), i32>(&mut store, ALLOC_FUNC)
+            .get_typed_function::<(i32, i32), i32>(&store, ALLOC_FUNC)
             .map_err(|e| {
                 CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
                     "missing `{ALLOC_FUNC}` export {e}"

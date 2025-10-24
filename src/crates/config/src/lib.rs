@@ -132,18 +132,13 @@ pub struct DestinationTimeouts {
     pub idle: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, Default)]
 #[ts(export)]
 pub enum DestinationRetryBackoffType {
     Exponential,
     Linear,
+    #[default]
     None,
-}
-
-impl Default for DestinationRetryBackoffType {
-    fn default() -> Self {
-        DestinationRetryBackoffType::None
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder, TS, Default)]

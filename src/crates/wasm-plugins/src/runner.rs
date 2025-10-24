@@ -28,8 +28,8 @@ impl WasmRunner {
         host_imports: Option<&[HostImportHandle]>,
     ) -> Self {
         let dynamic = host_imports
-            .map(|imports| imports.iter().cloned().collect())
-            .unwrap_or_else(Vec::new);
+            .map(|imports| imports.to_vec())
+            .unwrap_or_default();
 
         let pool = InstancePool::new(plugin.clone(), phase, dynamic);
         Self {

@@ -1,5 +1,6 @@
 use crate::utils::{read_bytes, with_mem_view};
 use crate::SharedExecutionContext;
+use http::{HeaderName, HeaderValue};
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
 fn set_header_raw(
@@ -23,9 +24,19 @@ fn set_header_raw(
         Err(_) => return,
     };
 
-    let mut inner = ctx.data().write();
+    let header_name = match HeaderName::from_bytes(name.as_bytes()) {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    let header_value = match HeaderValue::from_str(&value) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
 
-    inner.response_mut().headers_mut().insert(name, value);
+    let mut inner = ctx.data().write();
+    inner
+        .response_mut()
+        .insert_header(header_name, header_value);
 }
 
 pub fn set_header(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {

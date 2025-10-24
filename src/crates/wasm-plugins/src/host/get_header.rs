@@ -9,9 +9,15 @@ fn get_header_raw(
     out_ptr: i32,
     out_cap: i32,
 ) -> i32 {
-    read_key_lookup_and_write(&ctx, name_ptr, name_len, out_ptr, out_cap, true, |ecx| {
-        ecx.req_headers()
-    })
+    read_key_lookup_and_write(
+        &ctx,
+        name_ptr,
+        name_len,
+        out_ptr,
+        out_cap,
+        false,
+        |exec, key| exec.request().header_bytes(key),
+    )
 }
 
 pub fn get_header(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {

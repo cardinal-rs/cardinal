@@ -1,4 +1,4 @@
-use crate::host::read_key_lookup_and_write_ref;
+use crate::host::read_key_lookup_and_write;
 use crate::SharedExecutionContext;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
 
@@ -9,9 +9,20 @@ fn get_req_var_raw(
     out_ptr: i32,
     out_cap: i32,
 ) -> i32 {
-    let map = ctx.data().read();
-    let inner_map = map.persistent_vars().read();
-    read_key_lookup_and_write_ref(&ctx, name_ptr, name_len, out_ptr, out_cap, true, &inner_map)
+    read_key_lookup_and_write(
+        &ctx,
+        name_ptr,
+        name_len,
+        out_ptr,
+        out_cap,
+        true,
+        |exec, key| {
+            exec.persistent_vars()
+                .read()
+                .get(key)
+                .map(|value| value.as_bytes().to_vec())
+        },
+    )
 }
 
 pub fn get_req_var(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {

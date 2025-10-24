@@ -5,8 +5,9 @@ use cardinal_base::context::CardinalContext;
 use cardinal_base::provider::Provider;
 use cardinal_config::Plugin;
 use cardinal_errors::CardinalError;
+use cardinal_wasm_plugins::host::{HostFunctionBuilder, HostImportHandle};
 use cardinal_wasm_plugins::plugin::WasmPlugin;
-use cardinal_wasm_plugins::runner::{HostFunctionBuilder, HostFunctionMap, WasmRunner};
+use cardinal_wasm_plugins::runner::{host_import_from_builder, ExecutionPhase, WasmRunner};
 use cardinal_wasm_plugins::wasmer::{Function, FunctionEnv, Store};
 use cardinal_wasm_plugins::{ResponseState, SharedExecutionContext};
 use pingora::http::ResponseHeader;
@@ -27,21 +28,21 @@ pub enum PluginHandler {
 
 pub struct PluginContainer {
     plugins: HashMap<String, Arc<PluginHandler>>,
-    host_imports: HostFunctionMap,
+    host_imports: Vec<HostImportHandle>,
 }
 
 impl PluginContainer {
     pub fn new() -> Self {
         Self {
             plugins: HashMap::from_iter(Self::builtin_plugins()),
-            host_imports: HashMap::new(),
+            host_imports: Vec::new(),
         }
     }
 
     pub fn new_empty() -> Self {
         Self {
             plugins: HashMap::new(),
-            host_imports: HashMap::new(),
+            host_imports: Vec::new(),
         }
     }
 
@@ -70,23 +71,19 @@ impl PluginContainer {
     ) where
         F: Fn(&mut Store, &FunctionEnv<SharedExecutionContext>) -> Function + Send + Sync + 'static,
     {
-        let ns = namespace.into();
-        let host_entry = self.host_imports.entry(ns).or_default();
         let builder: HostFunctionBuilder = Arc::new(builder);
-        host_entry.push((name.into(), builder));
+        let import = host_import_from_builder(namespace, name, builder);
+        self.host_imports.push(import);
     }
 
-    pub fn extend_host_functions<I, S>(&mut self, namespace: S, functions: I)
+    pub fn extend_host_functions<I>(&mut self, functions: I)
     where
-        I: IntoIterator<Item = (String, HostFunctionBuilder)>,
-        S: Into<String>,
+        I: IntoIterator<Item = HostImportHandle>,
     {
-        let ns = namespace.into();
-        let host_entry = self.host_imports.entry(ns).or_default();
-        host_entry.extend(functions);
+        self.host_imports.extend(functions);
     }
 
-    fn host_imports(&self) -> Option<&HostFunctionMap> {
+    fn host_imports(&self) -> Option<&[HostImportHandle]> {
         if self.host_imports.is_empty() {
             None
         } else {
@@ -117,26 +114,54 @@ impl PluginContainer {
                 ))),
             },
             PluginHandler::Wasm(wasm) => {
-                let runner = WasmRunner::new(wasm, self.host_imports());
+                let runner = WasmRunner::new(wasm, ExecutionPhase::Inbound, self.host_imports());
 
                 let exec = runner.run(req_ctx.shared_context())?;
+                let should_continue = exec.should_continue;
 
-                if !exec.execution_context.req_headers().is_empty() {
-                    for (key, val) in exec.execution_context.req_headers() {
-                        let _ = session.req_header_mut().insert_header(key.to_string(), val);
+                let (header_updates, response_snapshot) = {
+                    let guard = exec.execution_context.read();
+                    let request_headers: Vec<(String, String)> = guard
+                        .request()
+                        .headers()
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            value
+                                .to_str()
+                                .ok()
+                                .map(|v| (key.as_str().to_string(), v.to_string()))
+                        })
+                        .collect();
+
+                    let response_state = guard.response().clone();
+                    (request_headers, response_state)
+                };
+
+                if !header_updates.is_empty() {
+                    for (key, val) in header_updates {
+                        let _ = session.req_header_mut().insert_header(key, val);
                     }
                 }
 
-                let response_state = exec.execution_context.response();
-                if !exec.should_continue || response_state.status_override().is_some() {
-                    let header_response = Self::build_response_header(response_state);
+                if !should_continue || response_snapshot.status_override().is_some() {
+                    let header_response = Self::build_response_header(&response_snapshot);
                     let _ = session
                         .write_response_header(Box::new(header_response), false)
                         .await;
-                    let _ = session.respond_error(response_state.status()).await;
+                    let _ = session.respond_error(response_snapshot.status()).await;
                     Ok(MiddlewareResult::Responded)
                 } else {
-                    Ok(MiddlewareResult::Continue(response_state.headers().clone()))
+                    let headers: HashMap<String, String> = response_snapshot
+                        .headers()
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            value
+                                .to_str()
+                                .ok()
+                                .map(|v| (key.as_str().to_string(), v.to_string()))
+                        })
+                        .collect();
+                    Ok(MiddlewareResult::Continue(headers))
                 }
             }
         }
@@ -172,19 +197,21 @@ impl PluginContainer {
                     }
                 },
                 PluginHandler::Wasm(wasm) => {
-                    let runner = WasmRunner::new(wasm, self.host_imports());
+                    let runner =
+                        WasmRunner::new(wasm, ExecutionPhase::Outbound, self.host_imports());
 
-                    let exec = runner.run(req_ctx.shared_context());
+                    match runner.run(req_ctx.shared_context()) {
+                        Ok(exec) => {
+                            let snapshot = {
+                                let guard = exec.execution_context.read();
+                                guard.response().clone()
+                            };
 
-                    match &exec {
-                        Ok(ex) => {
-                            let response_state = ex.execution_context.response();
-
-                            for (key, val) in response_state.headers() {
-                                let _ = response.insert_header(key.to_string(), val.to_string());
+                            for (key, val) in snapshot.headers().iter() {
+                                let _ = response.insert_header(key.clone(), val.clone());
                             }
 
-                            if let Some(status) = response_state.status_override() {
+                            if let Some(status) = snapshot.status_override() {
                                 let _ = response.set_status(status);
                             }
                         }
@@ -201,8 +228,8 @@ impl PluginContainer {
         let mut header = ResponseHeader::build(response.status(), None)
             .expect("failed to build response header");
 
-        for (key, value) in response.headers() {
-            let _ = header.insert_header(key.to_string(), value.to_string());
+        for (key, value) in response.headers().iter() {
+            let _ = header.insert_header(key.clone(), value.clone());
         }
 
         header

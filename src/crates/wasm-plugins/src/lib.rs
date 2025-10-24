@@ -1,210 +1,29 @@
-use ::wasmer::Memory;
-use bytes::Bytes;
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::Arc;
-
-#[derive(Clone, Debug)]
-pub struct ResponseState {
-    headers: HashMap<String, String>,
-    status: u16,
-    status_overridden: bool,
-}
-
-impl ResponseState {
-    pub fn with_default_status(status: u16) -> Self {
-        Self::from_parts(HashMap::new(), status, false)
-    }
-
-    pub fn from_parts(
-        headers: HashMap<String, String>,
-        status: u16,
-        status_overridden: bool,
-    ) -> Self {
-        Self {
-            headers,
-            status,
-            status_overridden,
-        }
-    }
-
-    pub fn headers(&self) -> &HashMap<String, String> {
-        &self.headers
-    }
-
-    pub fn headers_mut(&mut self) -> &mut HashMap<String, String> {
-        &mut self.headers
-    }
-
-    pub fn status(&self) -> u16 {
-        self.status
-    }
-
-    pub fn set_status(&mut self, status: u16) {
-        self.status = status;
-        self.status_overridden = true;
-    }
-
-    pub fn status_override(&self) -> Option<u16> {
-        self.status_overridden.then_some(self.status)
-    }
-}
-
-impl Default for ResponseState {
-    fn default() -> Self {
-        Self::with_default_status(0)
-    }
-}
-
-mod host;
+mod context;
+pub mod host;
 pub mod instance;
 pub mod plugin;
 pub mod runner;
 pub mod utils;
 
+pub use context::{ExecutionContext, RequestState, ResponseState, SharedExecutionContext};
+
 pub mod wasmer {
     pub use wasmer::*;
-}
-
-#[derive(Clone, Debug)]
-struct RequestData {
-    headers: Arc<HashMap<String, String>>,
-    query: Arc<HashMap<String, Vec<String>>>,
-    body: Option<Bytes>,
-    persistent_vars: Arc<RwLock<HashMap<String, String>>>,
-}
-
-impl RequestData {
-    fn new(
-        headers: HashMap<String, String>,
-        query: HashMap<String, Vec<String>>,
-        body: Option<Bytes>,
-        persistent_vars: Arc<RwLock<HashMap<String, String>>>,
-    ) -> Self {
-        Self {
-            headers: Arc::new(normalize_headers(headers)),
-            query: Arc::new(normalize_query(query)),
-            body,
-            persistent_vars,
-        }
-    }
-}
-
-impl Default for RequestData {
-    fn default() -> Self {
-        Self {
-            headers: Arc::new(HashMap::new()),
-            query: Arc::new(HashMap::new()),
-            body: None,
-            persistent_vars: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-}
-
-#[derive(Clone, Default, Debug)]
-pub struct ExecutionContext {
-    memory: Option<Memory>,
-    request: RequestData,
-    response: ResponseState,
-}
-
-impl ExecutionContext {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_response(response: ResponseState) -> Self {
-        Self {
-            response,
-            ..Self::default()
-        }
-    }
-
-    pub fn from_parts(
-        req_headers: HashMap<String, String>,
-        query: HashMap<String, Vec<String>>,
-        body: Option<Bytes>,
-        response: ResponseState,
-        persistent_vars: Arc<RwLock<HashMap<String, String>>>,
-    ) -> Self {
-        Self {
-            memory: None,
-            request: RequestData::new(req_headers, query, body, persistent_vars),
-            response,
-        }
-    }
-
-    pub fn replace_memory(&mut self, memory: Memory) {
-        self.memory.replace(memory);
-    }
-
-    pub fn memory(&self) -> &Option<Memory> {
-        &self.memory
-    }
-
-    pub fn memory_mut(&mut self) -> &mut Option<Memory> {
-        &mut self.memory
-    }
-
-    pub fn req_headers(&self) -> &HashMap<String, String> {
-        &self.request.headers
-    }
-
-    pub fn query(&self) -> &HashMap<String, Vec<String>> {
-        &self.request.query
-    }
-
-    pub fn query_mut(&mut self) -> &mut HashMap<String, Vec<String>> {
-        Arc::make_mut(&mut self.request.query)
-    }
-
-    pub fn body(&self) -> &Option<Bytes> {
-        &self.request.body
-    }
-
-    pub fn set_body(&mut self, body: Option<Bytes>) {
-        self.request.body = body;
-    }
-
-    pub fn response(&self) -> &ResponseState {
-        &self.response
-    }
-
-    pub fn response_mut(&mut self) -> &mut ResponseState {
-        &mut self.response
-    }
-
-    pub fn persistent_vars(&self) -> &Arc<RwLock<HashMap<String, String>>> {
-        &self.request.persistent_vars
-    }
-}
-
-pub type SharedExecutionContext = Arc<RwLock<ExecutionContext>>;
-
-fn normalize_headers(headers: HashMap<String, String>) -> HashMap<String, String> {
-    headers
-        .into_iter()
-        .map(|(k, v)| (k.to_ascii_lowercase(), v))
-        .collect()
-}
-
-fn normalize_query(query: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
-    query
-        .into_iter()
-        .map(|(k, v)| (k.to_ascii_lowercase(), v))
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::plugin::WasmPlugin;
-    use crate::runner::WasmRunner;
+    use crate::runner::{ExecutionPhase, WasmRunner};
     use bytes::Bytes;
+    use http::HeaderMap;
+    use parking_lot::RwLock;
     use serde_json::Value;
     use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     const CASE_ROOT: &str = "../../../tests/wasm-plugins";
 
@@ -239,8 +58,10 @@ mod tests {
         let incoming_path = case_dir.join("incoming_request.json");
         let expected_path = case_dir.join("expected_response.json");
 
-        let wasm_plugin = WasmPlugin::from_path(&wasm_path)
-            .unwrap_or_else(|e| panic!("failed to load plugin {:?}: {}", wasm_path, e));
+        let wasm_plugin = Arc::new(
+            WasmPlugin::from_path(&wasm_path)
+                .unwrap_or_else(|e| panic!("failed to load plugin {:?}: {}", wasm_path, e)),
+        );
 
         let incoming = load_json(&incoming_path);
         let expected = load_json(&expected_path);
@@ -255,10 +76,14 @@ mod tests {
 
         let exec_ctx = execution_context_from_value(&incoming, expected.execution_type, name);
 
-        let runner = WasmRunner::new(&wasm_plugin, None);
+        let runner = WasmRunner::new(
+            &wasm_plugin,
+            ExecutionPhase::from(expected.execution_type),
+            None,
+        );
         let shared_ctx = Arc::new(RwLock::new(exec_ctx));
         let result = runner
-            .run(shared_ctx)
+            .run(shared_ctx.clone())
             .unwrap_or_else(|e| panic!("plugin execution failed for {:?}: {}", wasm_path, e));
 
         assert_eq!(
@@ -266,7 +91,7 @@ mod tests {
             "decision mismatch for {}",
             name
         );
-        let context = result.execution_context;
+        let context = result.execution_context.read();
         match expected.execution_type {
             ScenarioKind::Response => {
                 let response = context.response();
@@ -283,7 +108,7 @@ mod tests {
                     name
                 );
 
-                let actual_headers = lowercase_string_map(response.headers().clone());
+                let actual_headers = lowercase_header_map(response.headers().clone());
                 for (key, value) in expected.resp_headers.iter() {
                     let actual = actual_headers
                         .get(key)
@@ -303,8 +128,6 @@ mod tests {
                     "inbound fixture {} should not define resp_headers",
                     name
                 );
-
-                // No header mutation assertions yet; request plugins under test only read state.
             }
         }
     }
@@ -331,8 +154,8 @@ mod tests {
         let body = value.get("body").and_then(body_from_value);
 
         let response_state = match scenario_kind {
-            ScenarioKind::Request => response_state_from_value(value, 403),
-            ScenarioKind::Response => response_state_from_value(value, 0),
+            ScenarioKind::Request => ResponseState::from_hash_map(HashMap::new(), 403, false),
+            ScenarioKind::Response => ResponseState::from_hash_map(HashMap::new(), 0, false),
         };
 
         ExecutionContext::from_parts(
@@ -401,6 +224,16 @@ mod tests {
             .collect()
     }
 
+    fn lowercase_header_map(map: HeaderMap) -> HashMap<String, String> {
+        let mut lowered = HashMap::new();
+        for (name, value) in map.iter() {
+            if let Ok(val) = value.to_str() {
+                lowered.insert(name.as_str().to_ascii_lowercase(), val.to_string());
+            }
+        }
+        lowered
+    }
+
     fn response_state_from_value(value: &Value, default_status: u16) -> ResponseState {
         let headers = lowercase_string_map(json_string_map(value.get("resp_headers")));
         let override_status = value.get("status").and_then(Value::as_i64).and_then(|raw| {
@@ -412,8 +245,8 @@ mod tests {
         });
 
         match override_status {
-            Some(status) => ResponseState::from_parts(headers, status, true),
-            None => ResponseState::from_parts(headers, default_status, false),
+            Some(status) => ResponseState::from_hash_map(headers, status, true),
+            None => ResponseState::from_hash_map(headers, default_status, false),
         }
     }
 
@@ -435,6 +268,15 @@ mod tests {
     enum ScenarioKind {
         Request,
         Response,
+    }
+
+    impl From<ScenarioKind> for ExecutionPhase {
+        fn from(value: ScenarioKind) -> Self {
+            match value {
+                ScenarioKind::Request => ExecutionPhase::Inbound,
+                ScenarioKind::Response => ExecutionPhase::Outbound,
+            }
+        }
     }
 
     struct ExpectedResponse {

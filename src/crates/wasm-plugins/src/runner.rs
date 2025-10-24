@@ -1,34 +1,39 @@
-use crate::instance::WasmInstance;
+use crate::host::{HostFunctionBuilder, HostImportHandle};
+use crate::instance::InstancePool;
 use crate::plugin::WasmPlugin;
-use crate::{ExecutionContext, SharedExecutionContext};
-use bytes::Bytes;
-use cardinal_errors::internal::CardinalInternalError;
+use crate::SharedExecutionContext;
 use cardinal_errors::CardinalError;
-use std::collections::HashMap;
 use std::sync::Arc;
-use wasmer::TypedFunction;
-use wasmer::{Function, FunctionEnv, Store};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionPhase {
+    Inbound,
+    Outbound,
+}
 
 #[derive(Debug)]
 pub struct ExecutionResult {
     pub should_continue: bool,
-    pub execution_context: ExecutionContext,
+    pub execution_context: SharedExecutionContext,
 }
 
-pub type HostFunctionBuilder =
-    Arc<dyn Fn(&mut Store, &FunctionEnv<SharedExecutionContext>) -> Function + Send + Sync>;
-pub type HostFunctionMap = HashMap<String, Vec<(String, HostFunctionBuilder)>>;
-
-pub struct WasmRunner<'a> {
-    pub plugin: &'a WasmPlugin,
-    host_imports: Option<&'a HostFunctionMap>,
+pub struct WasmRunner {
+    pool: Arc<InstancePool>,
 }
 
-impl<'a> WasmRunner<'a> {
-    pub fn new(plugin: &'a WasmPlugin, host_imports: Option<&'a HostFunctionMap>) -> Self {
+impl WasmRunner {
+    pub fn new(
+        plugin: &Arc<WasmPlugin>,
+        phase: ExecutionPhase,
+        host_imports: Option<&[HostImportHandle]>,
+    ) -> Self {
+        let dynamic = host_imports
+            .map(|imports| imports.iter().cloned().collect())
+            .unwrap_or_else(Vec::new);
+
+        let pool = InstancePool::new(plugin.clone(), phase, dynamic);
         Self {
-            plugin,
-            host_imports,
+            pool: Arc::new(pool),
         }
     }
 
@@ -36,78 +41,32 @@ impl<'a> WasmRunner<'a> {
         &self,
         shared_ctx: SharedExecutionContext,
     ) -> Result<ExecutionResult, CardinalError> {
-        // 1) Instantiate a fresh instance per request
-        let mut instance =
-            WasmInstance::from_plugin(self.plugin, self.host_imports, shared_ctx.clone())?;
+        let mut guard = self.pool.acquire(shared_ctx.clone())?;
+        let instance = guard.instance();
 
-        // I don't think we need this anymore
-        // {
-        //     let ctx = instance.env.as_mut(&mut instance.store);
-        //     let memory = ctx.memory().clone();
-        //     *ctx = exec_ctx;
-        //     *ctx.memory_mut() = memory;
-        // }
+        let body = shared_ctx.read().request().body().cloned();
+        let body_slice = body.as_ref().map(|bytes| bytes.as_ref());
 
-        // 3) Get exports
-        let handle: TypedFunction<(i32, i32), i32> = instance
-            .instance
-            .exports
-            .get_typed_function(&instance.store, "handle")
-            .map_err(|e| {
-                CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                    "missing `handle` export {e}"
-                )))
-            })?;
-
-        let alloc: TypedFunction<(i32, i32), i32> = instance
-            .instance
-            .exports
-            .get_typed_function(&instance.store, "__new")
-            .map_err(|e| {
-                CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                    "missing `alloc` export {e}"
-                )))
-            })?;
-
-        let body_opt: Option<Bytes> = {
-            let ctx_ref = instance.env.as_ref(&instance.store);
-            ctx_ref.read().body().clone()
-        };
-
-        let (ptr, len) = if let Some(body) = body_opt.filter(|b| !b.is_empty()) {
-            let len = body.len() as i32;
-
-            let p = alloc.call(&mut instance.store, len, 0).map_err(|e| {
-                CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                    "Alloc failed {e}"
-                )))
-            })?;
-
-            {
-                let view = instance.memory.view(&instance.store);
-                view.write(p as u64, &body).map_err(|e| {
-                    CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                        "Writing Body failed {e}"
-                    )))
-                })?;
-            }
-
-            (p, len)
-        } else {
-            (0, 0)
-        };
-
-        let decision = handle.call(&mut instance.store, ptr, len).map_err(|e| {
-            CardinalError::InternalError(CardinalInternalError::InvalidWasmModule(format!(
-                "WASM Handle call failed {e}"
-            )))
-        })?;
-
-        let exec_ctx_clone = shared_ctx.read().clone();
+        let (ptr, len) = instance.write_body(body_slice)?;
+        let decision = instance.call_handle(ptr, len)?;
 
         Ok(ExecutionResult {
             should_continue: decision == 1,
-            execution_context: exec_ctx_clone,
+            execution_context: shared_ctx,
         })
     }
+}
+
+pub fn host_import_from_builder<N, S>(
+    namespace: N,
+    name: S,
+    builder: HostFunctionBuilder,
+) -> HostImportHandle
+where
+    N: Into<String>,
+    S: Into<String>,
+{
+    Arc::new(crate::host::DynamicHostImport::new(
+        namespace, name, builder,
+    ))
 }

@@ -19,3 +19,4 @@ serde_json = "1.0"
 enum-as-inner = "0.6.1"
 tracing.workspace = true
 parking_lot.workspace = true
+http = "1.3"

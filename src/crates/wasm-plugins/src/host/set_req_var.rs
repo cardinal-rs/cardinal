@@ -24,7 +24,10 @@ fn set_req_var_raw(
     };
 
     let inner = ctx.data().write();
-    inner.persistent_vars().write().insert(name, value);
+    inner
+        .persistent_vars()
+        .write()
+        .insert(name.to_ascii_lowercase(), value);
 }
 
 pub fn set_req_var(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {

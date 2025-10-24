@@ -480,6 +480,7 @@ dependencies = [
  "cardinal-errors",
  "derive_builder",
  "enum-as-inner",
+ "http",
  "parking_lot",
  "serde_json",
  "tracing",

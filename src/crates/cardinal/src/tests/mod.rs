@@ -30,6 +30,7 @@ mod tests {
     use std::time::{Duration, Instant};
     use tiny_http::{Method, Response};
     use tokio::sync::OnceCell;
+    use ureq::http::{HeaderName, HeaderValue};
     use ureq::Error as UreqError;
 
     static SERVER: OnceLock<Mutex<std::thread::JoinHandle<()>>> = OnceLock::new();
@@ -695,10 +696,10 @@ mod tests {
 
                                 {
                                     let mut inner = ctx.data_mut().write();
-                                    inner
-                                        .response_mut()
-                                        .headers_mut()
-                                        .insert("x-env-signal".into(), "from-host".into());
+                                    inner.response_mut().headers_mut().insert(
+                                        HeaderName::from_static("x-env-signal"),
+                                        HeaderValue::from_static("from-host"),
+                                    );
                                 }
 
                                 if let Some(memory) = ctx.data().read().memory() {
@@ -817,10 +818,10 @@ mod tests {
                                 {
                                     let mut inner = ctx.data_mut().write();
 
-                                    inner
-                                        .response_mut()
-                                        .headers_mut()
-                                        .insert("x-env-signal".into(), "from-host".into());
+                                    inner.response_mut().headers_mut().insert(
+                                        HeaderName::from_static("x-env-signal"),
+                                        HeaderValue::from_static("from-host"),
+                                    );
                                 }
 
                                 if let Some(memory) = ctx.data().read().memory() {

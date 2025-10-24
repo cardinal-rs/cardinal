@@ -37,7 +37,7 @@ impl WasmRunner {
         }
     }
 
-    pub fn run(
+    pub fn run_raw(
         &self,
         shared_ctx: SharedExecutionContext,
     ) -> Result<ExecutionResult, CardinalError> {
@@ -54,6 +54,20 @@ impl WasmRunner {
             should_continue: decision == 1,
             execution_context: shared_ctx,
         })
+    }
+
+    pub fn run(
+        &self,
+        shared_ctx: SharedExecutionContext,
+    ) -> Result<ExecutionResult, CardinalError> {
+        let run = self.run_raw(shared_ctx);
+        match run {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                tracing::error!("Failed to run plugin: {}", e);
+                Err(e)
+            }
+        }
     }
 }
 

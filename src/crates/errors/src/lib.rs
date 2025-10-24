@@ -8,7 +8,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CardinalError {
-    #[error("Internal Error")]
+    #[error("Internal Error {0}")]
     InternalError(#[from] CardinalInternalError),
     #[error("Proxy Error")]
     ProxyError(#[from] CardinalProxyError),

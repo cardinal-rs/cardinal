@@ -14,6 +14,14 @@ mod set_header;
 mod set_req_var;
 mod set_status;
 
+use self::abort::ABORT_IMPORT;
+use self::get_header::GET_HEADER_IMPORT;
+use self::get_query_param::GET_QUERY_PARAM_IMPORT;
+use self::get_req_var::GET_REQ_VAR_IMPORT;
+use self::set_header::SET_HEADER_IMPORT;
+use self::set_req_var::SET_REQ_VAR_IMPORT;
+use self::set_status::SET_STATUS_IMPORT;
+
 pub type HostFunctionBuilder =
     Arc<dyn Fn(&mut Store, &FunctionEnv<SharedExecutionContext>) -> Function + Send + Sync>;
 
@@ -103,120 +111,6 @@ fn builtin_imports(phase: ExecutionPhase) -> &'static [&'static dyn HostImport] 
         ExecutionPhase::Outbound => OUTBOUND_IMPORTS,
     }
 }
-
-struct AbortImport;
-struct GetHeaderImport;
-struct GetQueryParamImport;
-struct SetHeaderImport;
-struct SetReqVarImport;
-struct SetStatusImport;
-struct GetReqVarImport;
-
-impl HostImport for AbortImport {
-    fn namespace(&self) -> &str {
-        "env"
-    }
-
-    fn name(&self) -> &str {
-        "abort"
-    }
-
-    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-        abort::abort(store, env)
-    }
-}
-
-impl HostImport for GetHeaderImport {
-    fn namespace(&self) -> &str {
-        "env"
-    }
-
-    fn name(&self) -> &str {
-        "get_header"
-    }
-
-    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-        get_header::get_header(store, env)
-    }
-}
-
-impl HostImport for GetQueryParamImport {
-    fn namespace(&self) -> &str {
-        "env"
-    }
-
-    fn name(&self) -> &str {
-        "get_query_param"
-    }
-
-    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-        get_query_param::get_query_param(store, env)
-    }
-}
-
-impl HostImport for SetHeaderImport {
-    fn namespace(&self) -> &str {
-        "env"
-    }
-
-    fn name(&self) -> &str {
-        "set_header"
-    }
-
-    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-        set_header::set_header(store, env)
-    }
-}
-
-impl HostImport for SetReqVarImport {
-    fn namespace(&self) -> &str {
-        "env"
-    }
-
-    fn name(&self) -> &str {
-        "set_req_var"
-    }
-
-    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-        set_req_var::set_req_var(store, env)
-    }
-}
-
-impl HostImport for SetStatusImport {
-    fn namespace(&self) -> &str {
-        "env"
-    }
-
-    fn name(&self) -> &str {
-        "set_status"
-    }
-
-    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-        set_status::set_status(store, env)
-    }
-}
-
-impl HostImport for GetReqVarImport {
-    fn namespace(&self) -> &str {
-        "env"
-    }
-
-    fn name(&self) -> &str {
-        "get_req_var"
-    }
-
-    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-        get_req_var::get_req_var(store, env)
-    }
-}
-
-static ABORT_IMPORT: AbortImport = AbortImport;
-static GET_HEADER_IMPORT: GetHeaderImport = GetHeaderImport;
-static GET_QUERY_PARAM_IMPORT: GetQueryParamImport = GetQueryParamImport;
-static SET_HEADER_IMPORT: SetHeaderImport = SetHeaderImport;
-static SET_REQ_VAR_IMPORT: SetReqVarImport = SetReqVarImport;
-static SET_STATUS_IMPORT: SetStatusImport = SetStatusImport;
-static GET_REQ_VAR_IMPORT: GetReqVarImport = GetReqVarImport;
 
 static INBOUND_IMPORTS: &[&dyn HostImport] = &[
     &ABORT_IMPORT,

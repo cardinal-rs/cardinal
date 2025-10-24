@@ -1,6 +1,25 @@
+use crate::host::HostImport;
 use crate::utils::{read_bytes, with_mem_view};
 use crate::SharedExecutionContext;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
+
+pub(crate) struct SetReqVarImport;
+
+impl HostImport for SetReqVarImport {
+    fn namespace(&self) -> &str {
+        "env"
+    }
+
+    fn name(&self) -> &str {
+        "set_req_var"
+    }
+
+    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
+        Function::new_typed_with_env(store, env, set_req_var_raw)
+    }
+}
+
+pub(crate) static SET_REQ_VAR_IMPORT: SetReqVarImport = SetReqVarImport;
 
 fn set_req_var_raw(
     ctx: FunctionEnvMut<SharedExecutionContext>,
@@ -28,8 +47,4 @@ fn set_req_var_raw(
         .persistent_vars()
         .write()
         .insert(name.to_ascii_lowercase(), value);
-}
-
-pub fn set_req_var(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-    Function::new_typed_with_env(store, env, set_req_var_raw)
 }

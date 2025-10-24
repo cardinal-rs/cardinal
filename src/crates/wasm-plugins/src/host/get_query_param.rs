@@ -1,6 +1,24 @@
-use crate::host::read_key_lookup_and_write;
+use crate::host::{read_key_lookup_and_write, HostImport};
 use crate::SharedExecutionContext;
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
+
+pub(crate) struct GetQueryParamImport;
+
+impl HostImport for GetQueryParamImport {
+    fn namespace(&self) -> &str {
+        "env"
+    }
+
+    fn name(&self) -> &str {
+        "get_query_param"
+    }
+
+    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
+        Function::new_typed_with_env(store, env, get_query_param_raw)
+    }
+}
+
+pub(crate) static GET_QUERY_PARAM_IMPORT: GetQueryParamImport = GetQueryParamImport;
 
 fn get_query_param_raw(
     ctx: FunctionEnvMut<SharedExecutionContext>,
@@ -22,8 +40,4 @@ fn get_query_param_raw(
                 .map(|value| value.into_bytes())
         },
     )
-}
-
-pub fn get_query_param(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-    Function::new_typed_with_env(store, env, get_query_param_raw)
 }

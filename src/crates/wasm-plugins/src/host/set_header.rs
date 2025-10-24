@@ -1,7 +1,26 @@
+use crate::host::HostImport;
 use crate::utils::{read_bytes, with_mem_view};
 use crate::SharedExecutionContext;
 use http::{HeaderName, HeaderValue};
 use wasmer::{Function, FunctionEnv, FunctionEnvMut, Store};
+
+pub(crate) struct SetHeaderImport;
+
+impl HostImport for SetHeaderImport {
+    fn namespace(&self) -> &str {
+        "env"
+    }
+
+    fn name(&self) -> &str {
+        "set_header"
+    }
+
+    fn build(&self, store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
+        Function::new_typed_with_env(store, env, set_header_raw)
+    }
+}
+
+pub(crate) static SET_HEADER_IMPORT: SetHeaderImport = SetHeaderImport;
 
 fn set_header_raw(
     ctx: FunctionEnvMut<SharedExecutionContext>,
@@ -37,8 +56,4 @@ fn set_header_raw(
     inner
         .response_mut()
         .insert_header(header_name, header_value);
-}
-
-pub fn set_header(store: &mut Store, env: &FunctionEnv<SharedExecutionContext>) -> Function {
-    Function::new_typed_with_env(store, env, set_header_raw)
 }

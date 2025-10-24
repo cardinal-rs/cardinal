@@ -1,3 +1,4 @@
+use crate::plugin_executor::CardinalPluginExecutor;
 use crate::runner::PluginRunner;
 use crate::REQ_UTC_TIME;
 use cardinal_base::context::CardinalContext;
@@ -22,8 +23,9 @@ impl RequestContext {
         context: Arc<CardinalContext>,
         backend: Arc<DestinationWrapper>,
         execution_context: ExecutionContext,
+        plugin_executor: Arc<dyn CardinalPluginExecutor>,
     ) -> Self {
-        let runner = PluginRunner::new(context.clone());
+        let runner = PluginRunner::new(context.clone(), plugin_executor);
         Self {
             cardinal_context: context,
             backend,

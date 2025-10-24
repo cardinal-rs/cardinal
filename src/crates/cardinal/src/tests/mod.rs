@@ -17,8 +17,8 @@ mod tests {
     use cardinal_plugins::headers::CARDINAL_PARAMS_HEADER_BASE;
     use cardinal_plugins::request_context::{RequestContext, RequestContextBase};
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
+    use cardinal_proxy::context_provider::CardinalContextProvider;
     use cardinal_proxy::req::ReqCtx;
-    use cardinal_proxy::CardinalContextProvider;
     use cardinal_wasm_plugins::plugin::WasmPlugin;
     use cardinal_wasm_plugins::wasmer::AsStoreRef;
     use pingora::proxy::Session;

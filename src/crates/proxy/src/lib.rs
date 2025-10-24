@@ -1,7 +1,9 @@
+pub mod context_provider;
 pub mod req;
 pub mod retry;
 mod utils;
 
+use crate::context_provider::CardinalContextProvider;
 use crate::req::ReqCtx;
 use crate::retry::RetryState;
 use crate::utils::requests::{
@@ -11,8 +13,8 @@ use crate::utils::requests::{
 use bytes::Bytes;
 use cardinal_base::context::CardinalContext;
 use cardinal_base::destinations::container::DestinationContainer;
-use cardinal_config::DestinationRetryBackoffType;
-use cardinal_plugins::request_context::{RequestContext, RequestContextBase};
+use cardinal_plugins::plugin_executor::CardinalPluginExecutor;
+use cardinal_plugins::request_context::RequestContext;
 use cardinal_plugins::runner::MiddlewareResult;
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
@@ -36,19 +38,6 @@ pub enum HealthCheckStatus {
     },
 }
 
-pub trait CardinalContextProvider: Send + Sync {
-    fn ctx(&self) -> ReqCtx {
-        ReqCtx::default()
-    }
-
-    fn resolve(&self, session: &Session, ctx: &mut ReqCtx) -> Option<Arc<CardinalContext>>;
-    fn health_check(&self, _session: &Session) -> HealthCheckStatus {
-        HealthCheckStatus::None
-    }
-
-    fn logging(&self, _session: &mut Session, _e: Option<&Error>, _ctx: &mut ReqCtx) {}
-}
-
 #[derive(Clone)]
 pub struct StaticContextProvider {
     context: Arc<CardinalContext>,
@@ -66,8 +55,12 @@ impl CardinalContextProvider for StaticContextProvider {
     }
 }
 
+#[async_trait::async_trait]
+impl CardinalPluginExecutor for StaticContextProvider {}
+
 pub struct CardinalProxy {
     provider: Arc<dyn CardinalContextProvider>,
+    plugin_executor: Arc<dyn CardinalPluginExecutor>,
 }
 
 impl CardinalProxy {
@@ -75,8 +68,14 @@ impl CardinalProxy {
         Self::builder(context).build()
     }
 
-    pub fn with_provider(provider: Arc<dyn CardinalContextProvider>) -> Self {
-        Self { provider }
+    pub fn with_provider(
+        provider: Arc<dyn CardinalContextProvider>,
+        plugin_executor: Arc<dyn CardinalPluginExecutor>,
+    ) -> Self {
+        Self {
+            provider,
+            plugin_executor,
+        }
     }
 
     pub fn builder(context: Arc<CardinalContext>) -> CardinalProxyBuilder {
@@ -86,26 +85,39 @@ impl CardinalProxy {
 
 pub struct CardinalProxyBuilder {
     provider: Arc<dyn CardinalContextProvider>,
+    plugin_executor: Arc<dyn CardinalPluginExecutor>,
 }
 
 impl CardinalProxyBuilder {
     pub fn new(context: Arc<CardinalContext>) -> Self {
         Self {
-            provider: Arc::new(StaticContextProvider::new(context)),
+            provider: Arc::new(StaticContextProvider::new(context.clone())),
+            plugin_executor: Arc::new(StaticContextProvider::new(context)),
         }
     }
 
-    pub fn from_context_provider(provider: Arc<dyn CardinalContextProvider>) -> Self {
-        Self { provider }
+    pub fn from_context_provider(
+        provider: Arc<dyn CardinalContextProvider>,
+        plugin_executor: Arc<dyn CardinalPluginExecutor>,
+    ) -> Self {
+        Self {
+            provider,
+            plugin_executor,
+        }
     }
 
-    pub fn with_context_provider(mut self, provider: Arc<dyn CardinalContextProvider>) -> Self {
+    pub fn with_context_provider(
+        mut self,
+        provider: Arc<dyn CardinalContextProvider>,
+        plugin_executor: Arc<dyn CardinalPluginExecutor>,
+    ) -> Self {
         self.provider = provider;
+        self.plugin_executor = plugin_executor;
         self
     }
 
     pub fn build(self) -> CardinalProxy {
-        CardinalProxy::with_provider(self.provider)
+        CardinalProxy::with_provider(self.provider, self.plugin_executor)
     }
 }
 
@@ -115,6 +127,13 @@ impl ProxyHttp for CardinalProxy {
 
     fn new_ctx(&self) -> Self::CTX {
         self.provider.ctx()
+    }
+
+    async fn early_request_filter(&self, _session: &mut Session, _ctx: &mut Self::CTX) -> Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
+        self.provider.early_request_filter(_session, _ctx).await
     }
 
     async fn logging(&self, _session: &mut Session, _e: Option<&Error>, ctx: &mut Self::CTX)
@@ -197,6 +216,7 @@ impl ProxyHttp for CardinalProxy {
             context.clone(),
             backend,
             execution_context_from_request(session),
+            self.plugin_executor.clone(),
         );
 
         let plugin_runner = request_state.plugin_runner.clone();

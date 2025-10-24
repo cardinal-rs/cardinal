@@ -150,10 +150,6 @@ impl ExecutionContext {
         &self.request.headers
     }
 
-    pub fn req_headers_mut(&mut self) -> &mut HashMap<String, String> {
-        Arc::make_mut(&mut self.request.headers)
-    }
-
     pub fn query(&self) -> &HashMap<String, Vec<String>> {
         &self.request.query
     }

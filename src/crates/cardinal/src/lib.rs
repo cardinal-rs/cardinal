@@ -7,7 +7,9 @@ use cardinal_config::{load_config, CardinalConfig};
 use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use cardinal_plugins::container::PluginContainer;
-use cardinal_proxy::{CardinalContextProvider, CardinalProxy, StaticContextProvider};
+use cardinal_plugins::plugin_executor::CardinalPluginExecutor;
+use cardinal_proxy::context_provider::CardinalContextProvider;
+use cardinal_proxy::{CardinalProxy, StaticContextProvider};
 use pingora::prelude::Server;
 use pingora::proxy::http_proxy_service;
 use std::sync::Arc;
@@ -15,6 +17,7 @@ use std::sync::Arc;
 pub struct Cardinal {
     context: Arc<CardinalContext>,
     context_provider: Arc<dyn CardinalContextProvider>,
+    plugin_executor: Arc<dyn CardinalPluginExecutor>,
 }
 
 impl Cardinal {
@@ -42,7 +45,10 @@ impl Cardinal {
         })?;
         server.bootstrap();
 
-        let proxy = CardinalProxy::with_provider(self.context_provider.clone());
+        let proxy = CardinalProxy::with_provider(
+            self.context_provider.clone(),
+            self.plugin_executor.clone(),
+        );
         let mut proxy_service = http_proxy_service(&server.configuration, proxy);
 
         let server_addr = self.context.config.server.address.clone();
@@ -60,6 +66,7 @@ pub struct CardinalBuilder {
     context: Arc<CardinalContext>,
     auto_register_defaults: bool,
     context_provider: Option<Arc<dyn CardinalContextProvider>>,
+    plugin_executor: Option<Arc<dyn CardinalPluginExecutor>>,
 }
 
 impl CardinalBuilder {
@@ -69,6 +76,7 @@ impl CardinalBuilder {
             context,
             auto_register_defaults: true,
             context_provider: None,
+            plugin_executor: None,
         }
     }
 
@@ -78,6 +86,7 @@ impl CardinalBuilder {
             context,
             auto_register_defaults: false,
             context_provider: None,
+            plugin_executor: None,
         }
     }
 
@@ -127,6 +136,11 @@ impl CardinalBuilder {
         self
     }
 
+    pub fn with_plugin_executor(mut self, provider: Arc<dyn CardinalPluginExecutor>) -> Self {
+        self.plugin_executor = Some(provider);
+        self
+    }
+
     pub fn build(self) -> Cardinal {
         if self.auto_register_defaults {
             if !self.context.is_registered::<DestinationContainer>() {
@@ -144,9 +158,14 @@ impl CardinalBuilder {
             .context_provider
             .unwrap_or_else(|| Arc::new(StaticContextProvider::new(self.context.clone())));
 
+        let plugin_executor = self
+            .plugin_executor
+            .unwrap_or_else(|| Arc::new(StaticContextProvider::new(self.context.clone())));
+
         Cardinal {
             context: self.context,
             context_provider: provider,
+            plugin_executor,
         }
     }
 }

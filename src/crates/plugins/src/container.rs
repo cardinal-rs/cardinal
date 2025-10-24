@@ -99,7 +99,6 @@ impl PluginContainer {
         name: &str,
         session: &mut Session,
         req_ctx: &mut RequestContext,
-        ctx: Arc<CardinalContext>,
     ) -> Result<MiddlewareResult, CardinalError> {
         let plugin = self
             .plugins
@@ -109,7 +108,9 @@ impl PluginContainer {
         match plugin.as_ref() {
             PluginHandler::Builtin(builtin) => match builtin {
                 PluginBuiltInType::Inbound(filter) => {
-                    filter.on_request(session, req_ctx, ctx).await
+                    filter
+                        .on_request(session, req_ctx, req_ctx.cardinal_context.clone())
+                        .await
                 }
                 PluginBuiltInType::Outbound(_) => Err(CardinalError::Other(format!(
                     "The filter {name} is not a request filter"
@@ -147,7 +148,6 @@ impl PluginContainer {
         session: &mut Session,
         req_ctx: &mut RequestContext,
         response: &mut pingora::http::ResponseHeader,
-        ctx: Arc<CardinalContext>,
     ) {
         let plugin = self
             .plugins
@@ -161,7 +161,14 @@ impl PluginContainer {
                         error!("The filter {name} is not a response filter");
                     }
                     PluginBuiltInType::Outbound(filter) => {
-                        filter.on_response(session, req_ctx, response, ctx).await
+                        filter
+                            .on_response(
+                                session,
+                                req_ctx,
+                                response,
+                                req_ctx.cardinal_context.clone(),
+                            )
+                            .await
                     }
                 },
                 PluginHandler::Wasm(wasm) => {

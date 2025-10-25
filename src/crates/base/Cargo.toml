@@ -13,8 +13,8 @@ categories = ["development-tools", "network-programming"]
 [dependencies]
 tokio.workspace = true
 async-trait.workspace = true
-cardinal-config = { path = "../config", version = "0.2.37" }
-cardinal-errors = { path = "../errors", version = "0.2.37" }
+cardinal-config = { path = "../config", version = "0.2.38" }
+cardinal-errors = { path = "../errors", version = "0.2.38" }
 matchit.workspace = true
 parking_lot.workspace = true
 pingora.workspace = true

@@ -159,7 +159,7 @@ mod tests {
         };
 
         ExecutionContext::from_parts(
-            req_headers,
+            HeaderMap::try_from(&req_headers).unwrap(),
             query,
             body,
             response_state,

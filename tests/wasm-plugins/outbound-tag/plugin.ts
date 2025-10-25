@@ -8,6 +8,7 @@ declare function host_get_header(
 
 @external("env", "set_header")
 declare function host_set_header(
+  setType: i32,
   namePtr: i32,
   nameLen: i32,
   valuePtr: i32,
@@ -47,7 +48,7 @@ function setHeader(name: string, value: string): void {
   const nlen = utf8len(name);
   const vptr = utf8ptr(value);
   const vlen = utf8len(value);
-  host_set_header(nptr, nlen, vptr, vlen);
+  host_set_header(1, nptr, nlen, vptr, vlen);
 }
 
 export function handle(_ptr: i32, _len: i32): i32 {

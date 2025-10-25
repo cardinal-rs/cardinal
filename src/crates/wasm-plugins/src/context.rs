@@ -98,7 +98,7 @@ impl QueryStore {
 
 #[derive(Clone, Debug)]
 pub struct RequestState {
-    headers: Arc<HeaderMap>,
+    headers: HeaderMap,
     query: Arc<QueryStore>,
     body: Option<Bytes>,
     persistent_vars: Arc<RwLock<HashMap<String, String>>>,
@@ -106,15 +106,14 @@ pub struct RequestState {
 
 impl RequestState {
     pub fn new(
-        headers: HashMap<String, String>,
+        headers: HeaderMap,
         query: HashMap<String, Vec<String>>,
         body: Option<Bytes>,
         persistent_vars: Arc<RwLock<HashMap<String, String>>>,
     ) -> Self {
-        let header_map = header_map_from_hashmap(headers);
         let query_store = QueryStore::new(query);
         Self {
-            headers: Arc::new(header_map),
+            headers,
             query: Arc::new(query_store),
             body,
             persistent_vars,
@@ -123,7 +122,7 @@ impl RequestState {
 
     pub fn empty() -> Self {
         Self {
-            headers: Arc::new(HeaderMap::new()),
+            headers: HeaderMap::new(),
             query: Arc::new(QueryStore::new(HashMap::new())),
             body: None,
             persistent_vars: Arc::new(RwLock::new(HashMap::new())),
@@ -132,6 +131,10 @@ impl RequestState {
 
     pub fn headers(&self) -> &HeaderMap {
         &self.headers
+    }
+
+    pub fn headers_mut(&mut self) -> &mut HeaderMap {
+        &mut self.headers
     }
 
     pub fn header_bytes(&self, name: &str) -> Option<Vec<u8>> {
@@ -188,7 +191,7 @@ impl ExecutionContext {
     }
 
     pub fn from_parts(
-        req_headers: HashMap<String, String>,
+        req_headers: HeaderMap,
         query: HashMap<String, Vec<String>>,
         body: Option<Bytes>,
         response: ResponseState,

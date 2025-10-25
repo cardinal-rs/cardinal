@@ -118,12 +118,7 @@ pub(crate) fn set_upstream_host_headers(
 }
 
 pub(crate) fn execution_context_from_request(session: &Session) -> ExecutionContext {
-    let get_req_headers = session
-        .req_header()
-        .headers
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
-        .collect();
+    let get_req_headers = session.req_header().headers.clone();
 
     let query = parse_query_string_multi(session.req_header().uri.query().unwrap_or(""));
 

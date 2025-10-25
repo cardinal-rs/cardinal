@@ -24,6 +24,7 @@ pub(crate) static SET_HEADER_IMPORT: SetHeaderImport = SetHeaderImport;
 
 fn set_header_raw(
     ctx: FunctionEnvMut<SharedExecutionContext>,
+    set_type: i32,
     name_ptr: i32,
     name_len: i32,
     val_ptr: i32,
@@ -52,8 +53,16 @@ fn set_header_raw(
         Err(_) => return,
     };
 
-    let mut inner = ctx.data().write();
-    inner
-        .response_mut()
-        .insert_header(header_name, header_value);
+    if set_type == 1 {
+        let mut inner = ctx.data().write();
+        inner
+            .response_mut()
+            .insert_header(header_name, header_value);
+    } else if set_type == 0 {
+        let mut inner = ctx.data().write();
+        let _ = inner
+            .request_mut()
+            .headers_mut()
+            .insert(header_name, header_value);
+    }
 }

@@ -8,6 +8,7 @@ declare function host_get_req_var(
 
 @external("env", "set_header")
 declare function host_set_header(
+  setType: i32,
   namePtr: i32,
   nameLen: i32,
   valuePtr: i32,
@@ -23,7 +24,7 @@ function utf8len(s: string): i32 {
 }
 
 function writeHeader(name: string, value: string): void {
-  host_set_header(utf8ptr(name), utf8len(name), utf8ptr(value), utf8len(value));
+  host_set_header(1, utf8ptr(name), utf8len(name), utf8ptr(value), utf8len(value));
 }
 
 export function handle(_ptr: i32, _len: i32): i32 {

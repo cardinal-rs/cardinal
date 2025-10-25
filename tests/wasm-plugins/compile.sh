@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SRC="test1.ts"
-OUT="plugin.wasm"
+SRC="${SRC:-test1.ts}"
+OUT="${OUT:-plugin.wasm}"
 
 # Ensure AssemblyScript is available
 if ! command -v npx &>/dev/null; then

@@ -412,6 +412,132 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_middleware_sets_request_and_response_headers() {
+        let config = load_test_config("request_response_headers.toml");
+        let builder = Cardinal::builder(config);
+        let context = builder.context();
+        let server_addr = context.config.server.address.clone();
+        let backend_addr = context
+            .config
+            .destinations
+            .get("posts")
+            .expect("posts destination")
+            .url
+            .clone();
+
+        let captured_user_id = Arc::new(Mutex::new(None));
+        let captured_user_id_clone = captured_user_id.clone();
+        let _backend_server = spawn_backend(
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                let user_header = request.headers().iter().find_map(|h| {
+                    if h.field.equiv("User-Id") {
+                        Some(h.value.as_str().to_string())
+                    } else {
+                        None
+                    }
+                });
+
+                *captured_user_id_clone.lock().unwrap() = user_header.clone();
+
+                let body = user_header.unwrap_or_else(|| "missing".to_string());
+                let response = Response::from_string(body);
+                let _ = request.respond(response).unwrap();
+            })],
+        );
+
+        let builder = builder.register_provider_with_factory::<PluginContainer, _>(
+            ProviderScope::Singleton,
+            move |_ctx| {
+                const PLUGIN_NAME: &str = "RequestResponseHeaders";
+                let mut container = PluginContainer::new_empty();
+                container.add_plugin(
+                    PLUGIN_NAME.to_string(),
+                    PluginHandler::Builtin(PluginBuiltInType::Inbound(Arc::new(
+                        RequestResponseHeaderMiddleware::new(
+                            "User-Id",
+                            "alpha",
+                            "x-plugin-applied",
+                            "true",
+                        ),
+                    ))),
+                );
+                Ok(container)
+            },
+        );
+
+        let cardinal = builder.build();
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "alpha");
+
+        let response_header = response
+            .headers()
+            .get("x-plugin-applied")
+            .and_then(|v| v.to_str().ok());
+        assert_eq!(response_header, Some("true"));
+
+        let captured = captured_user_id.lock().unwrap();
+        assert_eq!(captured.as_deref(), Some("alpha"));
+    }
+
+    #[tokio::test]
+    async fn wasm_plugin_sets_request_and_response_headers() {
+        let config = load_test_config("wasm_request_response_headers.toml");
+        let server_addr = config.server.address.clone();
+        let backend_addr = destination_url(&config, "posts");
+
+        let captured_user_id = Arc::new(Mutex::new(None));
+        let captured_user_id_clone = captured_user_id.clone();
+        let _backend_server = spawn_backend(
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                let user_header = request.headers().iter().find_map(|h| {
+                    if h.field.equiv("User-Id") {
+                        Some(h.value.as_str().to_string())
+                    } else {
+                        None
+                    }
+                });
+
+                *captured_user_id_clone.lock().unwrap() = user_header.clone();
+
+                let body = user_header.unwrap_or_else(|| "missing".to_string());
+                let response = Response::from_string(body);
+                let _ = request.respond(response).unwrap();
+            })],
+        );
+
+        let cardinal = Cardinal::new(config);
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "beta");
+
+        let response_header = response
+            .headers()
+            .get("x-plugin-applied")
+            .and_then(|v| v.to_str().ok());
+        assert_eq!(response_header, Some("true"));
+
+        let captured = captured_user_id.lock().unwrap();
+        assert_eq!(captured.as_deref(), Some("beta"));
+    }
+
+    #[tokio::test]
     async fn wasm_request_middleware_propagates_headers() {
         let config = load_test_config("wasm_request_header_set.toml");
         let server_addr = config.server.address.clone();
@@ -2136,6 +2262,50 @@ mod tests {
             self.hits.fetch_add(1, Ordering::SeqCst);
             let _ = session.respond_error(418).await;
             Ok(MiddlewareResult::Responded)
+        }
+    }
+
+    struct RequestResponseHeaderMiddleware {
+        request_name: &'static str,
+        request_value: &'static str,
+        response_name: &'static str,
+        response_value: &'static str,
+    }
+
+    impl RequestResponseHeaderMiddleware {
+        fn new(
+            request_name: &'static str,
+            request_value: &'static str,
+            response_name: &'static str,
+            response_value: &'static str,
+        ) -> Self {
+            Self {
+                request_name,
+                request_value,
+                response_name,
+                response_value,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RequestMiddleware for RequestResponseHeaderMiddleware {
+        async fn on_request(
+            &self,
+            session: &mut Session,
+            _req_ctx: &mut RequestContext,
+            _cardinal: Arc<CardinalContext>,
+        ) -> Result<MiddlewareResult, CardinalError> {
+            let _ = session
+                .req_header_mut()
+                .insert_header(self.request_name, self.request_value);
+
+            let mut headers = HashMap::new();
+            headers.insert(
+                self.response_name.to_string(),
+                self.response_value.to_string(),
+            );
+            Ok(MiddlewareResult::Continue(headers))
         }
     }
 

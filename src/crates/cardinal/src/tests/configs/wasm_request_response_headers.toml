@@ -1,0 +1,15 @@
+[server]
+address = "127.0.0.1:23221"
+force_path_parameter = true
+log_upstream_response = false
+global_request_middleware = ["request_response"]
+global_response_middleware = []
+
+[destinations.posts]
+name = "posts"
+url = "127.0.0.1:33221"
+routes = []
+middleware = []
+
+[[plugins]]
+wasm = { name = "request_response", path = "../../../tests/wasm-plugins/request-response/plugin.wasm" }

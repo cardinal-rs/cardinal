@@ -15,6 +15,7 @@ mod tests {
     use cardinal_errors::CardinalError;
     use cardinal_plugins::container::{PluginBuiltInType, PluginContainer, PluginHandler};
     use cardinal_plugins::headers::CARDINAL_PARAMS_HEADER_BASE;
+    use cardinal_plugins::plugin_executor::CardinalPluginExecutor;
     use cardinal_plugins::request_context::{RequestContext, RequestContextBase};
     use cardinal_plugins::runner::{MiddlewareResult, RequestMiddleware, ResponseMiddleware};
     use cardinal_proxy::context_provider::CardinalContextProvider;
@@ -284,6 +285,71 @@ mod tests {
 
         assert_eq!(request_hits.load(Ordering::SeqCst), 1);
         assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn plugin_executor_denies_global_request_middleware() {
+        let config = load_test_config("plugin_executor_denies.toml");
+        let builder = Cardinal::builder(config);
+        let context = builder.context();
+        let server_addr = context.config.server.address.clone();
+        let backend_addr = context
+            .config
+            .destinations
+            .get("posts")
+            .expect("posts destination")
+            .url
+            .clone();
+
+        let backend_hits = Arc::new(AtomicUsize::new(0));
+        let backend_hits_clone = backend_hits.clone();
+        let _backend_server = spawn_backend(
+            backend_addr.clone(),
+            vec![Route::new(Method::Get, "/post", move |request| {
+                backend_hits_clone.fetch_add(1, Ordering::SeqCst);
+                let response = Response::from_string("backend-ok");
+                let _ = request.respond(response).unwrap();
+            })],
+        );
+
+        let plugin_hits = Arc::new(AtomicUsize::new(0));
+        let plugin_hits_for_container = plugin_hits.clone();
+
+        let builder = builder.register_provider_with_factory::<PluginContainer, _>(
+            ProviderScope::Singleton,
+            move |_ctx| {
+                const PLUGIN_NAME: &str = "ShortCircuitDenied";
+                let mut container = PluginContainer::new_empty();
+                container.add_plugin(
+                    PLUGIN_NAME.to_string(),
+                    PluginHandler::Builtin(PluginBuiltInType::Inbound(Arc::new(
+                        TestRequestShortCircuitMiddleware {
+                            hits: plugin_hits_for_container.clone(),
+                        },
+                    ))),
+                );
+                Ok(container)
+            },
+        );
+
+        let can_run_calls = Arc::new(AtomicUsize::new(0));
+        let plugin_executor: Arc<dyn CardinalPluginExecutor> =
+            Arc::new(DenyingPluginExecutor::new(can_run_calls.clone()));
+        let cardinal = builder.with_plugin_executor(plugin_executor).build();
+
+        let _cardinal_thread = spawn_cardinal(cardinal);
+        wait_for_startup().await;
+
+        let mut response = ureq::get(&http_url(&server_addr, "/posts/post"))
+            .call()
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "backend-ok");
+        assert_eq!(backend_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(plugin_hits.load(Ordering::SeqCst), 0);
+        assert_eq!(can_run_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -1972,6 +2038,29 @@ mod tests {
         std::thread::spawn(move || {
             cardinal.run().unwrap();
         })
+    }
+
+    struct DenyingPluginExecutor {
+        can_run_calls: Arc<AtomicUsize>,
+    }
+
+    impl DenyingPluginExecutor {
+        fn new(can_run_calls: Arc<AtomicUsize>) -> Self {
+            Self { can_run_calls }
+        }
+    }
+
+    #[async_trait]
+    impl CardinalPluginExecutor for DenyingPluginExecutor {
+        async fn can_run_plugin(
+            &self,
+            _binding_id: &str,
+            _session: &mut Session,
+            _req_ctx: &mut RequestContext,
+        ) -> Result<bool, pingora::BError> {
+            self.can_run_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(false)
+        }
     }
 
     struct TestContextProvider {

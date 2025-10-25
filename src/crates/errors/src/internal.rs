@@ -17,4 +17,6 @@ pub enum CardinalInternalError {
     InvalidRouteConfiguration(String),
     #[error("Invalid Wasm Module {0}")]
     InvalidWasmModule(String),
+    #[error("Request plugin did not complete {0}")]
+    RequestPluginError(String),
 }

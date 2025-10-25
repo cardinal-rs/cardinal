@@ -2,6 +2,7 @@ use crate::plugin_executor::CardinalPluginExecutor;
 use crate::request_context::RequestContext;
 use async_trait::async_trait;
 use cardinal_base::context::CardinalContext;
+use cardinal_errors::internal::CardinalInternalError;
 use cardinal_errors::CardinalError;
 use pingora::http::ResponseHeader;
 use pingora::proxy::Session;
@@ -68,6 +69,18 @@ impl PluginRunner {
         &self.global_response
     }
 
+    pub async fn can_run(
+        &self,
+        filter: &str,
+        session: &mut Session,
+        req_ctx: &mut RequestContext,
+    ) -> Result<bool, CardinalError> {
+        self.plugin_executor
+            .can_run_plugin(&filter, session, req_ctx)
+            .await
+            .map_err(|e| CardinalInternalError::RequestPluginError(format!("{:?}", e)).into())
+    }
+
     pub async fn run_request_filters(
         &self,
         session: &mut Session,
@@ -76,6 +89,12 @@ impl PluginRunner {
         let mut resp_headers = HashMap::new();
 
         for filter in self.global_request_filters() {
+            let can_run = self.can_run(filter, session, req_ctx).await?;
+
+            if !can_run {
+                continue;
+            }
+
             let run = self
                 .plugin_executor
                 .run_request_filter(filter, session, req_ctx)
@@ -115,6 +134,15 @@ impl PluginRunner {
         response: &mut ResponseHeader,
     ) {
         for filter in self.global_response_filters() {
+            let can_run = self
+                .can_run(filter, session, req_ctx)
+                .await
+                .unwrap_or(false);
+
+            if !can_run {
+                continue;
+            }
+
             let _ = self
                 .plugin_executor
                 .run_response_filter(filter, session, req_ctx, response)

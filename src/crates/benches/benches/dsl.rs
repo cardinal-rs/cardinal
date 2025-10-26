@@ -68,13 +68,16 @@ fn bench_routes_path_exact_before_prefix(c: &mut Criterion) {
     let url_prefix = http_url(server_addr, "/status/health");
     let host = "status.example.com";
 
+    let agent = ureq::Agent::new_with_defaults();
+
     let mut group = c.benchmark_group("dsl_simple");
     group.bench_function("routes_path_exact_before_prefix", |b| {
         b.iter(|| {
             let mut body = String::new();
 
             {
-                let mut response = ureq::get(&url_exact)
+                let mut response = agent
+                    .get(&url_exact)
                     .header("Host", host)
                     .call()
                     .expect("exact route response");
@@ -85,7 +88,8 @@ fn bench_routes_path_exact_before_prefix(c: &mut Criterion) {
             }
 
             {
-                let mut response = ureq::get(&url_prefix)
+                let mut response = agent
+                    .get(&url_prefix)
                     .header("Host", host)
                     .call()
                     .expect("prefix route response");
@@ -166,13 +170,16 @@ fn bench_routes_regex_hosts_and_fallback(c: &mut Criterion) {
     let url_v3 = http_url(server_addr, "/v3/unknown");
     let host = "api.eu.example.com";
 
+    let agent = ureq::Agent::new_with_defaults();
+
     let mut group = c.benchmark_group("dsl_heavy");
     group.bench_function("routes_regex_hosts_and_fallback", |b| {
         b.iter(|| {
             let mut body = String::new();
 
             {
-                let mut response = ureq::get(&url_v1)
+                let mut response = agent
+                    .get(&url_v1)
                     .header("Host", host)
                     .call()
                     .expect("v1 response");
@@ -183,7 +190,8 @@ fn bench_routes_regex_hosts_and_fallback(c: &mut Criterion) {
             }
 
             {
-                let mut response = ureq::get(&url_v2)
+                let mut response = agent
+                    .get(&url_v2)
                     .header("Host", host)
                     .call()
                     .expect("v2 response");
@@ -194,7 +202,8 @@ fn bench_routes_regex_hosts_and_fallback(c: &mut Criterion) {
             }
 
             {
-                let mut response = ureq::get(&url_v3)
+                let mut response = agent
+                    .get(&url_v3)
                     .header("Host", host)
                     .call()
                     .expect("fallback response");

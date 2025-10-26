@@ -56,11 +56,13 @@ fn bench_global_request_middleware_executes_before_backend(c: &mut Criterion) {
     wait_for_startup();
 
     let url = http_url(&server_addr, "/posts/post");
+    let agent = ureq::Agent::new_with_defaults();
 
     let mut group = c.benchmark_group("plugins_simple");
     group.bench_function("global_request_middleware_executes_before_backend", |b| {
+        let agent = agent.clone();
         b.iter(|| {
-            let mut response = ureq::get(&url).call().expect("successful response");
+            let mut response = agent.get(&url).call().expect("successful response");
             assert_eq!(response.status(), 200);
             let mut body = String::new();
             let body = response.body_mut().read_to_string().unwrap();
@@ -95,11 +97,14 @@ fn bench_wasm_outbound_plugin_adds_response_headers(c: &mut Criterion) {
     wait_for_startup();
 
     let url = http_url(&server_addr, "/posts/post");
+    let agent = ureq::Agent::new_with_defaults();
 
     let mut group = c.benchmark_group("plugins_heavy");
     group.bench_function("wasm_outbound_plugin_adds_response_headers", |b| {
+        let agent = agent.clone();
         b.iter(|| {
-            let mut response = ureq::get(&url)
+            let mut response = agent
+                .get(&url)
                 .header("x-set-response", "true")
                 .call()
                 .expect("outbound plugin response");

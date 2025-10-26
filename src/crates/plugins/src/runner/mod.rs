@@ -111,9 +111,16 @@ impl PluginRunner {
         let backend = req_ctx.backend.clone(); // Cheap clone
         let inbound_middleware = backend.get_inbound_middleware();
         for middleware in inbound_middleware {
+            let middleware_name = &middleware.name;
+            let can_run = self.can_run(middleware_name, session, req_ctx).await?;
+
+            if !can_run {
+                continue;
+            }
+
             let run = self
                 .plugin_executor
-                .run_request_filter(&middleware.name, session, req_ctx)
+                .run_request_filter(middleware_name, session, req_ctx)
                 .await?;
 
             match run {
@@ -153,6 +160,16 @@ impl PluginRunner {
         let outbound_middleware = backend.get_outbound_middleware();
         for middleware in outbound_middleware {
             let middleware_name = &middleware.name;
+
+            let can_run = self
+                .can_run(middleware_name, session, req_ctx)
+                .await
+                .unwrap_or(false);
+
+            if !can_run {
+                continue;
+            }
+
             let _ = self
                 .plugin_executor
                 .run_response_filter(middleware_name, session, req_ctx, response)

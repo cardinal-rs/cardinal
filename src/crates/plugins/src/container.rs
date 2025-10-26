@@ -144,12 +144,8 @@ impl PluginContainer {
                 }
 
                 if !should_continue || response_snapshot.status_override().is_some() {
-                    let header_response = Self::build_response_header(&response_snapshot);
-                    let _ = session
-                        .write_response_header(Box::new(header_response), false)
-                        .await;
-                    let _ = session.respond_error(response_snapshot.status()).await;
-                    Ok(MiddlewareResult::Responded)
+                    let state = Self::build_response_header(&response_snapshot);
+                    Ok(Self::respond_from_response_state(state, response_snapshot.status(), session).await)
                 } else {
                     let headers: HashMap<String, String> = response_snapshot
                         .headers()
@@ -224,7 +220,7 @@ impl PluginContainer {
         }
     }
 
-    fn build_response_header(response: &ResponseState) -> ResponseHeader {
+    pub fn build_response_header(response: &ResponseState) -> ResponseHeader {
         let mut header = ResponseHeader::build(response.status(), None)
             .expect("failed to build response header");
 
@@ -233,6 +229,15 @@ impl PluginContainer {
         }
 
         header
+    }
+
+    pub async fn respond_from_response_state(response_header: ResponseHeader, status: u16, session: &mut Session) -> MiddlewareResult {
+        let _ = session
+            .write_response_header(Box::new(response_header), false)
+            .await;
+        let _ = session.respond_error(status).await;
+
+        MiddlewareResult::Responded
     }
 }
 

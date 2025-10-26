@@ -1,0 +1,36 @@
+[package]
+name = "benches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+cardinal-rs = { path = "../cardinal", version = "0.2.38" }
+cardinal-config = { path = "../config", version = "0.2.38" }
+cardinal-plugins = { path = "../plugins", version = "0.2.38" }
+cardinal-base = { path = "../base", version = "0.2.38" }
+cardinal-errors = { path = "../errors", version = "0.2.38" }
+cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.38" }
+async-trait.workspace = true
+pingora.workspace = true
+tiny_http = "0.12.0"
+ureq = "3.1.2"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "baseline"
+harness = false
+
+[[bench]]
+name = "dsl"
+harness = false
+
+[[bench]]
+name = "plugins"
+harness = false

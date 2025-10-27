@@ -9,12 +9,12 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-cardinal-rs = { path = "../cardinal", version = "0.2.38" }
-cardinal-config = { path = "../config", version = "0.2.38" }
-cardinal-plugins = { path = "../plugins", version = "0.2.38" }
-cardinal-base = { path = "../base", version = "0.2.38" }
-cardinal-errors = { path = "../errors", version = "0.2.38" }
-cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.38" }
+cardinal-rs = { path = "../cardinal", version = "0.2.39" }
+cardinal-config = { path = "../config", version = "0.2.39" }
+cardinal-plugins = { path = "../plugins", version = "0.2.39" }
+cardinal-base = { path = "../base", version = "0.2.39" }
+cardinal-errors = { path = "../errors", version = "0.2.39" }
+cardinal-wasm-plugins = { path = "../wasm-plugins", version = "0.2.39" }
 async-trait.workspace = true
 pingora.workspace = true
 tiny_http = "0.12.0"

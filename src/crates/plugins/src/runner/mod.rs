@@ -76,9 +76,9 @@ impl PluginRunner {
         req_ctx: &mut RequestContext,
     ) -> Result<bool, CardinalError> {
         self.plugin_executor
-            .can_run_plugin(&filter, session, req_ctx)
+            .can_run_plugin(filter, session, req_ctx)
             .await
-            .map_err(|e| CardinalInternalError::RequestPluginError(format!("{:?}", e)).into())
+            .map_err(|e| CardinalInternalError::RequestPluginError(format!("{e:?}")).into())
     }
 
     pub async fn run_request_filters(

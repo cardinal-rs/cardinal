@@ -109,7 +109,10 @@ fn bench_wasm_outbound_plugin_adds_response_headers(c: &mut Criterion) {
                 .call()
                 .expect("outbound plugin response");
             assert_eq!(response.status(), 201);
-            let tag = response.headers().get("x-wasm-response").map(|s| s.to_str().unwrap());
+            let tag = response
+                .headers()
+                .get("x-wasm-response")
+                .map(|s| s.to_str().unwrap());
             assert_eq!(tag, Some("enabled"));
             let mut body = String::new();
             let body = response.body_mut().read_to_string().unwrap();

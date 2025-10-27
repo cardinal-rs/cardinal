@@ -29,7 +29,7 @@ pub mod support {
 
     /// Convenience helper to format an HTTP url from host and path.
     pub fn http_url(address: &str, path: &str) -> String {
-        format!("http://{}{}", address, path)
+        format!("http://{address}{path}")
     }
 
     /// Returns the configured destination url or panics if missing.

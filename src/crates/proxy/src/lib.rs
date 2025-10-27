@@ -143,6 +143,35 @@ impl ProxyHttp for CardinalProxy {
         self.provider.logging(_session, _e, ctx);
     }
 
+    async fn request_body_filter(
+        &self,
+        _session: &mut Session,
+        _body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+        _ctx: &mut Self::CTX,
+    ) -> Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
+        self.provider
+            .request_body_filter(_session, _body, _end_of_stream, _ctx)
+            .await
+    }
+
+    fn response_body_filter(
+        &self,
+        _session: &mut Session,
+        _body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+        _ctx: &mut Self::CTX,
+    ) -> Result<Option<Duration>>
+    where
+        Self::CTX: Send + Sync,
+    {
+        self.provider
+            .response_body_filter(_session, _body, _end_of_stream, _ctx)
+    }
+
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
         let path = session.req_header().uri.path().to_string();
         info!(%path, "Request received");
